@@ -1,0 +1,22 @@
+<section class="login-page">
+  <div class="login-card">
+    <h1>Login</h1>
+    <p>Sign in to access the dashboard.</p>
+
+    <form [formGroup]="loginForm" (ngSubmit)="submit()" novalidate>
+      <label for="email">Email</label>
+      <input id="email" type="email" formControlName="email" />
+      @if (loginForm.controls.email.touched && loginForm.controls.email.invalid) {
+        <small>Please enter a valid email address.</small>
+      }
+
+      <label for="password">Password</label>
+      <input id="password" type="password" formControlName="password" />
+      @if (loginForm.controls.password.touched && loginForm.controls.password.invalid) {
+        <small>Password must be at least 6 characters.</small>
+      }
+
+      <button type="submit">Sign In</button>
+    </form>
+  </div>
+</section>
