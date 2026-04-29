@@ -1,0 +1,23 @@
+<section class="dash-home">
+  <h1 class="dash-home__title">Overview</h1>
+  <p class="dash-home__subtitle">
+    Quick snapshot of ingestion, validation status, and workflow progress.
+  </p>
+
+  <div class="dash-home__grid">
+    @for (s of stats; track s.label) {
+      <mat-card class="dash-home__card" appearance="outlined">
+        <div class="dash-home__card-label">{{ s.label }}</div>
+        <div class="dash-home__card-value">{{ s.value }}</div>
+        <div class="dash-home__card-hint">{{ s.hint }}</div>
+      </mat-card>
+    }
+  </div>
+
+  <mat-card class="dash-home__panel" appearance="outlined">
+    <div class="dash-home__panel-title">Recent activity</div>
+    <p class="dash-home__panel-body">
+      Connect the API to show recent uploads, validation issues, and manual corrections.
+    </p>
+  </mat-card>
+</section>

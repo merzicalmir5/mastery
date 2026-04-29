@@ -1,0 +1,17 @@
+.dash-section {
+  &__title {
+    margin: 0 0 0.85rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+
+  &__card {
+    padding: 1rem;
+    border-radius: 0 !important;
+  }
+
+  &__body {
+    margin: 0;
+    color: rgba(17, 24, 39, 0.65);
+  }
+}
