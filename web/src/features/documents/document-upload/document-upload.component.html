@@ -1,0 +1,35 @@
+<section class="upload">
+  <h1 class="upload__title">Upload documents</h1>
+  <p class="upload__subtitle">
+    Drag and drop a file here or browse. {{ acceptedHint }}
+  </p>
+
+  <div
+    class="upload__drop"
+    (dragover)="onDragOver($event)"
+    (drop)="onDrop($event)"
+    role="button"
+    tabindex="0"
+    (keydown.enter)="fileInput.click()"
+    (keydown.space)="fileInput.click()"
+  >
+    <mat-icon class="upload__drop-icon" aria-hidden="true">cloud_upload</mat-icon>
+    <p class="upload__drop-text">Drop file to upload</p>
+    <button mat-stroked-button type="button" (click)="fileInput.click()">Browse files</button>
+    <input
+      #fileInput
+      class="upload__input"
+      type="file"
+      [accept]="'.pdf,.csv,.txt,.png,.jpg,.jpeg,.webp'"
+      (change)="onFileSelected($event)"
+    />
+  </div>
+
+  @if (lastMessage(); as msg) {
+    <div class="upload__feedback">{{ msg }}</div>
+  }
+
+  <div class="upload__footer">
+    <a mat-button routerLink="/dashboard/documents">Go to all documents</a>
+  </div>
+</section>
