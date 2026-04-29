@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import type { DocumentStatus } from '../documents/models/document.models';
 
 export const dashboardRoutes: Routes = [
   {
@@ -9,31 +10,47 @@ export const dashboardRoutes: Routes = [
   {
     path: 'upload',
     loadComponent: () =>
-      import('./pages/dashboard-section.component').then((m) => m.DashboardSectionComponent),
-    data: { title: 'Upload documents' },
+      import('../documents/document-upload/document-upload.component').then(
+        (m) => m.DocumentUploadComponent,
+      ),
+  },
+  {
+    path: 'documents/:id',
+    loadComponent: () =>
+      import('../documents/document-detail/document-detail.component').then(
+        (m) => m.DocumentDetailComponent,
+      ),
   },
   {
     path: 'documents',
     loadComponent: () =>
-      import('./pages/dashboard-section.component').then((m) => m.DashboardSectionComponent),
-    data: { title: 'All documents' },
+      import('../documents/document-list/document-list.component').then(
+        (m) => m.DocumentListComponent,
+      ),
+    data: {},
   },
   {
     path: 'review',
     loadComponent: () =>
-      import('./pages/dashboard-section.component').then((m) => m.DashboardSectionComponent),
-    data: { title: 'Needs review' },
+      import('../documents/document-list/document-list.component').then(
+        (m) => m.DocumentListComponent,
+      ),
+    data: { statusFilter: 'needs_review' satisfies DocumentStatus },
   },
   {
     path: 'validated',
     loadComponent: () =>
-      import('./pages/dashboard-section.component').then((m) => m.DashboardSectionComponent),
-    data: { title: 'Validated' },
+      import('../documents/document-list/document-list.component').then(
+        (m) => m.DocumentListComponent,
+      ),
+    data: { statusFilter: 'validated' satisfies DocumentStatus },
   },
   {
     path: 'rejected',
     loadComponent: () =>
-      import('./pages/dashboard-section.component').then((m) => m.DashboardSectionComponent),
-    data: { title: 'Rejected' },
+      import('../documents/document-list/document-list.component').then(
+        (m) => m.DocumentListComponent,
+      ),
+    data: { statusFilter: 'rejected' satisfies DocumentStatus },
   },
 ];

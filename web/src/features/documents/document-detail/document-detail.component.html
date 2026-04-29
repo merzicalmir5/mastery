@@ -1,0 +1,192 @@
+@if (!doc()) {
+  <section class="doc-detail doc-detail--missing">
+    <h1 class="doc-detail__title">Document not found</h1>
+    <button mat-stroked-button type="button" (click)="back()">Back to list</button>
+  </section>
+} @else {
+  <section class="doc-detail">
+    <div class="doc-detail__header">
+      <div>
+        <h1 class="doc-detail__title">{{ doc()!.fileName }}</h1>
+        <p class="doc-detail__meta">
+          {{ doc()!.documentKind === 'invoice' ? 'Invoice' : 'Purchase order' }} ·
+          {{ doc()!.status }}
+        </p>
+      </div>
+      <div class="doc-detail__actions">
+        <button mat-stroked-button type="button" (click)="back()">Back</button>
+        <button mat-flat-button color="primary" type="button" (click)="confirm()">
+          Confirm
+        </button>
+        <button mat-stroked-button color="warn" type="button" (click)="reject()">
+          Reject
+        </button>
+      </div>
+    </div>
+
+    @if (doc()!.validationIssues.length) {
+      <mat-card class="doc-detail__issues" appearance="outlined">
+        <div class="doc-detail__issues-title">Validation issues</div>
+        <ul class="doc-detail__issues-list">
+          @for (issue of doc()!.validationIssues; track issue.message + issue.field) {
+            <li [class.doc-detail__issues-item--warn]="issue.severity === 'warning'">
+              <strong>{{ issue.field }}</strong>: {{ issue.message }}
+            </li>
+          }
+        </ul>
+      </mat-card>
+    }
+
+    <mat-card class="doc-detail__card" appearance="outlined">
+      <div class="doc-detail__card-title">Extracted fields</div>
+      <form class="doc-detail__form" [formGroup]="form" (ngSubmit)="confirm()">
+        <div class="doc-detail__grid">
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('supplierName')"
+              appearance="outline"
+            >
+              <mat-label>Supplier</mat-label>
+              <input matInput formControlName="supplierName" />
+            </mat-form-field>
+            @for (m of issuesForField('supplierName'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('documentNumber')"
+              appearance="outline"
+            >
+              <mat-label>Document number</mat-label>
+              <input matInput formControlName="documentNumber" />
+            </mat-form-field>
+            @for (m of issuesForField('documentNumber'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('issueDate')"
+              appearance="outline"
+            >
+              <mat-label>Issue date</mat-label>
+              <input matInput formControlName="issueDate" />
+            </mat-form-field>
+            @for (m of issuesForField('issueDate'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('dueDate')"
+              appearance="outline"
+            >
+              <mat-label>Due date</mat-label>
+              <input matInput formControlName="dueDate" />
+            </mat-form-field>
+            @for (m of issuesForField('dueDate'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('currency')"
+              appearance="outline"
+            >
+              <mat-label>Currency</mat-label>
+              <input matInput formControlName="currency" />
+            </mat-form-field>
+            @for (m of issuesForField('currency'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('subtotal')"
+              appearance="outline"
+            >
+              <mat-label>Subtotal</mat-label>
+              <input matInput type="number" formControlName="subtotal" />
+            </mat-form-field>
+            @for (m of issuesForField('subtotal'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('tax')"
+              appearance="outline"
+            >
+              <mat-label>Tax</mat-label>
+              <input matInput type="number" formControlName="tax" />
+            </mat-form-field>
+            @for (m of issuesForField('tax'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('total')"
+              appearance="outline"
+            >
+              <mat-label>Total</mat-label>
+              <input matInput type="number" formControlName="total" />
+            </mat-form-field>
+            @for (m of issuesForField('total'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+        </div>
+      </form>
+    </mat-card>
+
+    <mat-card class="doc-detail__card" appearance="outlined">
+      <div class="doc-detail__card-title">Line items</div>
+      @if (doc()!.lineItems.length === 0) {
+        <p class="doc-detail__empty-lines">No line items.</p>
+      } @else {
+        <div class="doc-detail__table-wrap">
+          <table mat-table [dataSource]="doc()!.lineItems" class="doc-detail__lines">
+            <ng-container matColumnDef="description">
+              <th mat-header-cell *matHeaderCellDef>Description</th>
+              <td mat-cell *matCellDef="let row">{{ row.description }}</td>
+            </ng-container>
+            <ng-container matColumnDef="quantity">
+              <th mat-header-cell *matHeaderCellDef>Qty</th>
+              <td mat-cell *matCellDef="let row">{{ row.quantity }}</td>
+            </ng-container>
+            <ng-container matColumnDef="unitPrice">
+              <th mat-header-cell *matHeaderCellDef>Unit</th>
+              <td mat-cell *matCellDef="let row">{{ row.unitPrice }}</td>
+            </ng-container>
+            <ng-container matColumnDef="lineTotal">
+              <th mat-header-cell *matHeaderCellDef>Line total</th>
+              <td mat-cell *matCellDef="let row">{{ row.lineTotal }}</td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="lineColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: lineColumns"></tr>
+          </table>
+        </div>
+      }
+      @if (hasIssue('lineItems')) {
+        <p class="doc-detail__line-issue">{{ issuesForField('lineItems').join(' ') }}</p>
+      }
+    </mat-card>
+  </section>
+}

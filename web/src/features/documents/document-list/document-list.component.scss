@@ -1,0 +1,99 @@
+.doc-list {
+  &__title {
+    margin: 0 0 0.35rem;
+    font-size: 1.35rem;
+    font-weight: 700;
+  }
+
+  &__subtitle {
+    margin: 0 0 1rem;
+    color: rgba(17, 24, 39, 0.65);
+    max-width: 46rem;
+    font-size: 0.92rem;
+  }
+
+  &__empty {
+    padding: 1.25rem;
+    border: 1px dashed rgba(17, 24, 39, 0.2);
+    border-radius: 8px;
+    color: rgba(17, 24, 39, 0.55);
+    text-align: center;
+  }
+
+  &__table-wrap {
+    overflow: auto;
+    border: 1px solid rgba(17, 24, 39, 0.1);
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  &__table {
+    width: 100%;
+    min-width: 720px;
+  }
+
+  &__row:hover {
+    background: rgba(31, 111, 235, 0.04);
+  }
+
+  &__kind {
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    border: 1px solid rgba(17, 24, 39, 0.15);
+
+    &--invoice {
+      background: rgba(31, 111, 235, 0.08);
+    }
+
+    &--purchase_order {
+      background: rgba(124, 92, 255, 0.1);
+    }
+  }
+
+  &__status {
+    font-size: 0.8rem;
+    font-weight: 600;
+
+    &--uploaded {
+      color: rgba(17, 24, 39, 0.55);
+    }
+
+    &--needs_review {
+      color: #b45309;
+    }
+
+    &--validated {
+      color: #15803d;
+    }
+
+    &--rejected {
+      color: #b91c1c;
+    }
+  }
+
+  &__issue-badge {
+    display: inline-flex;
+    min-width: 1.5rem;
+    justify-content: center;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: rgba(185, 28, 28, 0.12);
+    color: #b91c1c;
+    cursor: default;
+  }
+
+  &__issue-zero {
+    font-size: 0.85rem;
+    color: rgba(17, 24, 39, 0.35);
+  }
+
+  &__open {
+    border-radius: 8px !important;
+    font-size: 0.82rem;
+    line-height: 1.2;
+  }
+}

@@ -1,0 +1,65 @@
+.upload {
+  &__title {
+    margin: 0 0 0.35rem;
+    font-size: 1.35rem;
+    font-weight: 700;
+  }
+
+  &__subtitle {
+    margin: 0 0 1rem;
+    color: rgba(17, 24, 39, 0.65);
+    max-width: 46rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+  }
+
+  &__drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    min-height: 11rem;
+    padding: 1.25rem;
+    border: 2px dashed rgba(17, 24, 39, 0.18);
+    border-radius: 12px;
+    background: rgba(31, 111, 235, 0.04);
+    outline: none;
+  }
+
+  &__drop:focus-visible {
+    border-color: rgba(31, 111, 235, 0.55);
+    box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.2);
+  }
+
+  &__drop-icon {
+    font-size: 2.25rem !important;
+    width: 2.25rem !important;
+    height: 2.25rem !important;
+    color: rgba(31, 111, 235, 0.85);
+  }
+
+  &__drop-text {
+    margin: 0;
+    font-weight: 600;
+    color: rgba(17, 24, 39, 0.75);
+  }
+
+  &__input {
+    display: none;
+  }
+
+  &__feedback {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid rgba(17, 24, 39, 0.12);
+    background: #fafbfc;
+    font-size: 0.88rem;
+    color: rgba(17, 24, 39, 0.85);
+  }
+
+  &__footer {
+    margin-top: 1.25rem;
+  }
+}

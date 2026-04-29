@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
 import { MatCardModule } from '@angular/material/card';
+import { DocumentService } from '../../documents/services/document.service';
 
 @Component({
   selector: 'app-dashboard-home',
@@ -9,10 +10,15 @@ import { MatCardModule } from '@angular/material/card';
   styleUrl: './dashboard-home.component.scss',
 })
 export class DashboardHomeComponent {
-  readonly stats = [
-    { label: 'Total documents', value: '—', hint: 'mock' },
-    { label: 'Needs review', value: '—', hint: 'validation issues' },
-    { label: 'Validated', value: '—', hint: 'confirmed' },
-    { label: 'Rejected', value: '—', hint: 'final' },
-  ] as const;
+  private readonly documents = inject(DocumentService);
+
+  readonly stats = computed(() => {
+    const c = this.documents.summaryCounts();
+    return [
+      { label: 'Total documents', value: String(c.total), hint: 'All statuses' },
+      { label: 'Needs review', value: String(c.needsReview), hint: 'Validation issues' },
+      { label: 'Validated', value: String(c.validated), hint: 'Confirmed' },
+      { label: 'Rejected', value: String(c.rejected), hint: 'Final' },
+    ];
+  });
 }
