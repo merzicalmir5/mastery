@@ -12,6 +12,13 @@ export const routes: Routes = [
       import('../features/login/login.component').then((m) => m.LoginComponent),
   },
   {
+    path: 'dashboard',
+    loadComponent: () =>
+      import('../features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
+    loadChildren: () =>
+      import('../features/dashboard/dashboard.routes').then((m) => m.dashboardRoutes),
+  },
+  {
     path: '**',
     redirectTo: 'login',
   },
