@@ -1,22 +1,37 @@
-<section class="login-page">
-  <div class="login-card">
-    <h1>Login</h1>
-    <p>Sign in to access the dashboard.</p>
+<section class="login">
+  <mat-card class="login__card" appearance="outlined">
+    <form class="login__form" [formGroup]="loginForm" (ngSubmit)="submit()" novalidate>
+      <div class="login__brand">
+        <img class="login__logo" src="/assets/logo.png" alt="Mastery logo" />
+      </div>
 
-    <form [formGroup]="loginForm" (ngSubmit)="submit()" novalidate>
-      <label for="email">Email</label>
-      <input id="email" type="email" formControlName="email" />
-      @if (loginForm.controls.email.touched && loginForm.controls.email.invalid) {
-        <small>Please enter a valid email address.</small>
-      }
+      <mat-form-field class="login__field" appearance="outline">
+        <input
+          matInput
+          type="email"
+          formControlName="email"
+          placeholder="Email"
+          aria-label="Email"
+        />
+        @if (loginForm.controls.email.touched && loginForm.controls.email.invalid) {
+          <mat-error>Please enter a valid email address.</mat-error>
+        }
+      </mat-form-field>
 
-      <label for="password">Password</label>
-      <input id="password" type="password" formControlName="password" />
-      @if (loginForm.controls.password.touched && loginForm.controls.password.invalid) {
-        <small>Password must be at least 6 characters.</small>
-      }
+      <mat-form-field class="login__field" appearance="outline">
+        <input
+          matInput
+          type="password"
+          formControlName="password"
+          placeholder="Password"
+          aria-label="Password"
+        />
+        @if (loginForm.controls.password.touched && loginForm.controls.password.invalid) {
+          <mat-error>Password must be at least 6 characters.</mat-error>
+        }
+      </mat-form-field>
 
-      <button type="submit">Sign In</button>
+      <button class="login__submit" mat-flat-button type="submit">Sign In</button>
     </form>
-  </div>
+  </mat-card>
 </section>
