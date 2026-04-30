@@ -7,7 +7,7 @@
 
   &__subtitle {
     margin: 0 0 1rem;
-    color: rgba(17, 24, 39, 0.65);
+    color: var(--app-text-primary);
     max-width: 46rem;
     font-size: 0.92rem;
     line-height: 1.45;
@@ -36,13 +36,13 @@
     font-size: 2.25rem !important;
     width: 2.25rem !important;
     height: 2.25rem !important;
-    color: rgba(31, 111, 235, 0.85);
+    color: var(--app-text-primary);
   }
 
   &__drop-text {
     margin: 0;
     font-weight: 600;
-    color: rgba(17, 24, 39, 0.75);
+    color: var(--app-text-primary);
   }
 
   &__input {
@@ -56,7 +56,7 @@
     border: 1px solid rgba(17, 24, 39, 0.12);
     background: #fafbfc;
     font-size: 0.88rem;
-    color: rgba(17, 24, 39, 0.85);
+    color: var(--app-text-primary);
   }
 
   &__footer {

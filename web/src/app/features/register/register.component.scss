@@ -1,4 +1,4 @@
-.login {
+.register {
   min-height: 100dvh;
   display: grid;
   place-items: center;
@@ -7,6 +7,14 @@
     radial-gradient(circle at 20% 20%, rgba(31, 111, 235, 0.2), transparent 35%),
     radial-gradient(circle at 80% 0%, rgba(124, 92, 255, 0.2), transparent 30%),
     #f4f7ff;
+  color: var(--app-text-primary);
+
+  :host-context(html.theme-dark) & {
+    background:
+      radial-gradient(circle at 20% 20%, rgba(31, 111, 235, 0.12), transparent 35%),
+      radial-gradient(circle at 80% 0%, rgba(124, 92, 255, 0.1), transparent 30%),
+      #121212;
+  }
 
   &__card {
     width: 100%;
@@ -29,6 +37,30 @@
     height: auto;
     display: block;
     object-fit: contain;
+  }
+
+  &__alert {
+    margin: 0 0 0.5rem;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: #b3261e;
+    background: rgba(179, 38, 30, 0.08);
+    border: 1px solid rgba(179, 38, 30, 0.25);
+  }
+
+  :host-context(html.theme-dark) &__alert {
+    color: #f2b8b5;
+    background: rgba(242, 184, 181, 0.08);
+    border-color: rgba(242, 184, 181, 0.25);
+  }
+
+  &__title {
+    margin: 0 0 0.35rem;
+    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--app-text-primary);
   }
 
   &__form {
@@ -79,8 +111,20 @@
     border-radius: 0;
     --mdc-filled-button-container-shape: 0;
     background: #fff !important;
-    color: #111 !important;
-    border: 1px solid #111;
+    color: var(--app-text-primary) !important;
+    border: 1px solid var(--app-text-primary);
     box-shadow: none !important;
+  }
+
+  &__back-login {
+    margin-top: 0.55rem;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--app-text-primary);
+    text-decoration: none;
+  }
+
+  &__back-login:hover {
+    text-decoration: underline;
   }
 }

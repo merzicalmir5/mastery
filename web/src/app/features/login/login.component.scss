@@ -1,0 +1,138 @@
+.login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(31, 111, 235, 0.2), transparent 35%),
+    radial-gradient(circle at 80% 0%, rgba(124, 92, 255, 0.2), transparent 30%),
+    #f4f7ff;
+  color: var(--app-text-primary);
+
+  :host-context(html.theme-dark) & {
+    background:
+      radial-gradient(circle at 20% 20%, rgba(31, 111, 235, 0.12), transparent 35%),
+      radial-gradient(circle at 80% 0%, rgba(124, 92, 255, 0.1), transparent 30%),
+      #121212;
+  }
+
+  &__card {
+    width: 100%;
+    max-width: 420px;
+    padding: 1.75rem;
+    border-radius: 18px;
+    border-color: rgba(31, 111, 235, 0.15);
+    box-shadow: 0 22px 45px rgba(23, 38, 71, 0.12);
+  }
+
+  &__brand {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0.2rem;
+  }
+
+  &__logo {
+    width: 6.5rem;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    object-fit: contain;
+  }
+
+  &__alert {
+    margin: 0 0 0.5rem;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: #b3261e;
+    background: rgba(179, 38, 30, 0.08);
+    border: 1px solid rgba(179, 38, 30, 0.25);
+  }
+
+  :host-context(html.theme-dark) &__alert {
+    color: #f2b8b5;
+    background: rgba(242, 184, 181, 0.08);
+    border-color: rgba(242, 184, 181, 0.25);
+  }
+
+  &__title {
+    margin: 0 0 0.35rem;
+    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--app-text-primary);
+  }
+
+  &__form {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  &__field {
+    width: 100%;
+  }
+
+  :host ::ng-deep &__field .mat-mdc-text-field-wrapper {
+    height: 2.8rem;
+  }
+
+  :host ::ng-deep &__field .mat-mdc-form-field-flex {
+    height: 100%;
+    align-items: center;
+  }
+
+  :host ::ng-deep &__field .mat-mdc-form-field-infix {
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  :host ::ng-deep &__field .mat-mdc-input-element {
+    text-align: left;
+    height: 100%;
+    margin: 0;
+    padding: 0 !important;
+    line-height: 2.8rem;
+  }
+
+  :host ::ng-deep &__field input::placeholder {
+    font-size: 0.82rem;
+    text-align: left;
+    opacity: 1;
+  }
+
+  &__submit {
+    margin-top: 0.8rem;
+    width: 100%;
+    height: 2.8rem;
+    font-weight: 600;
+    border-radius: 0;
+    --mdc-filled-button-container-shape: 0;
+    background: #fff !important;
+    color: var(--app-text-primary) !important;
+    border: 1px solid var(--app-text-primary);
+    box-shadow: none !important;
+  }
+
+  &__links {
+    margin-top: 0.55rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  &__forgot-password,
+  &__create-account {
+    font-size: 0.85rem;
+    color: var(--app-text-primary);
+    text-decoration: none;
+  }
+
+  &__forgot-password:hover,
+  &__create-account:hover {
+    text-decoration: underline;
+  }
+}

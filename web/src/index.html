@@ -15,6 +15,13 @@
       href="https://fonts.googleapis.com/icon?family=Material+Icons"
       rel="stylesheet"
     />
+    <script>
+      try {
+        if (localStorage.getItem('mastery-theme') === 'dark') {
+          document.documentElement.classList.add('theme-dark');
+        }
+      } catch (_) {}
+    </script>
   </head>
   <body>
     <app-root></app-root>

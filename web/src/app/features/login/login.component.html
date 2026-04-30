@@ -1,0 +1,59 @@
+<section class="login">
+  <mat-card class="login__card" appearance="outlined">
+    <form class="login__form" [formGroup]="loginForm" (ngSubmit)="submit()" novalidate>
+      <div class="login__brand">
+        <img class="login__logo" src="/assets/logo.png" alt="Mastery logo" />
+      </div>
+      <h1 class="login__title">Login</h1>
+
+      @if (errorMessage()) {
+        <p class="login__alert" role="alert">{{ errorMessage() }}</p>
+      }
+
+      <mat-form-field class="login__field" appearance="outline">
+        <input
+          matInput
+          type="email"
+          autocomplete="email"
+          formControlName="email"
+          placeholder="Email"
+          aria-label="Email"
+        />
+        @if (loginForm.controls.email.touched && loginForm.controls.email.invalid) {
+          <mat-error>Valid email is required.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field class="login__field login__field--password" appearance="outline">
+        <input
+          matInput
+          [type]="hidePassword ? 'password' : 'text'"
+          autocomplete="current-password"
+          formControlName="password"
+          placeholder="Password"
+          aria-label="Password"
+        />
+        <button
+          mat-icon-button
+          matSuffix
+          type="button"
+          (click)="hidePassword = !hidePassword"
+          [attr.aria-label]="hidePassword ? 'Show password' : 'Hide password'"
+        >
+          <mat-icon>{{ hidePassword ? 'visibility' : 'visibility_off' }}</mat-icon>
+        </button>
+        @if (loginForm.controls.password.touched && loginForm.controls.password.invalid) {
+          <mat-error>Password is required.</mat-error>
+        }
+      </mat-form-field>
+
+      <button class="login__submit" mat-flat-button type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Signing in…' : 'Sign In' }}
+      </button>
+      <div class="login__links">
+        <a class="login__forgot-password" routerLink="/forgot-password">Forgot password</a>
+        <a class="login__create-account" routerLink="/register">Sign up</a>
+      </div>
+    </form>
+  </mat-card>
+</section>

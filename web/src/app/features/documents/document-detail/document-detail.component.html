@@ -8,7 +8,7 @@
     <div class="doc-detail__header">
       <div>
         <h1 class="doc-detail__title">{{ doc()!.fileName }}</h1>
-        <p class="doc-detail__meta">
+        <p class="doc-detail__meta" [ngClass]="'doc-detail__meta--' + doc()!.status">
           {{ doc()!.documentKind === 'invoice' ? 'Invoice' : 'Purchase order' }} ·
           {{ doc()!.status }}
         </p>
