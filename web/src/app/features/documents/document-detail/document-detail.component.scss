@@ -22,8 +22,24 @@
   &__meta {
     margin: 0;
     font-size: 0.88rem;
-    color: rgba(17, 24, 39, 0.6);
+    color: var(--app-text-primary);
     text-transform: capitalize;
+
+    &--uploaded {
+      color: var(--status-uploaded);
+    }
+
+    &--needs_review {
+      color: var(--status-needs-review);
+    }
+
+    &--validated {
+      color: var(--status-validated);
+    }
+
+    &--rejected {
+      color: var(--status-rejected);
+    }
   }
 
   &__actions {
@@ -43,18 +59,18 @@
   &__issues-title {
     font-weight: 700;
     margin-bottom: 0.5rem;
-    color: #991b1b;
+    color: var(--issues-title);
   }
 
   &__issues-list {
     margin: 0;
     padding-left: 1.2rem;
     font-size: 0.88rem;
-    color: rgba(17, 24, 39, 0.85);
+    color: var(--issues-body);
   }
 
   &__issues-item--warn {
-    color: #92400e;
+    color: var(--status-warn);
   }
 
   &__card {
@@ -94,7 +110,7 @@
     line-height: 1.3;
 
     &--error {
-      color: #b91c1c;
+      color: var(--status-error);
     }
   }
 
@@ -110,13 +126,13 @@
   &__empty-lines {
     margin: 0;
     font-size: 0.88rem;
-    color: rgba(17, 24, 39, 0.55);
+    color: var(--app-text-primary);
   }
 
   &__line-issue {
     margin: 0.75rem 0 0;
     font-size: 0.82rem;
-    color: #b91c1c;
+    color: var(--status-issue);
   }
 }
 

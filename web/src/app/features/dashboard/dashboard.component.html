@@ -1,0 +1,93 @@
+<div class="dashboard">
+  <div class="dashboard__layout">
+  <mat-sidenav-container class="dashboard__shell">
+    <mat-sidenav
+      class="dashboard__sidenav"
+      [mode]="isMobile() ? 'over' : 'side'"
+      [opened]="sidenavOpen()"
+      [fixedInViewport]="isMobile()"
+      [disableClose]="false"
+      (openedChange)="onSidenavOpenedChange($event)"
+    >
+      <div class="dashboard__brand">
+        <img class="dashboard__logo" src="/assets/logo.png" alt="Mastery" />
+      </div>
+
+      <nav class="dashboard__nav" aria-label="Main" (click)="closeSidenavAfterNav()">
+        <mat-nav-list>
+          @for (item of navItems; track item.route) {
+            <a
+              mat-list-item
+              class="dashboard__nav-item"
+              [routerLink]="item.route"
+              routerLinkActive="dashboard__nav-item--active"
+              [routerLinkActiveOptions]="{ exact: item.exact }"
+            >
+              <mat-icon matListItemIcon>{{ item.icon }}</mat-icon>
+              <span matListItemTitle>{{ item.label }}</span>
+            </a>
+          }
+        </mat-nav-list>
+      </nav>
+
+      <div class="dashboard__footer">
+        <button
+          class="dashboard__logout"
+          mat-stroked-button
+          type="button"
+          (click)="logout()"
+        >
+          <mat-icon>logout</mat-icon>
+          Logout
+        </button>
+      </div>
+    </mat-sidenav>
+
+    <mat-sidenav-content class="dashboard__content">
+      <mat-toolbar class="dashboard__toolbar" color="primary">
+        @if (isMobile()) {
+          <button
+            mat-icon-button
+            type="button"
+            class="dashboard__menu-toggle"
+            (click)="toggleSidenav()"
+            [attr.aria-label]="sidenavOpen() ? 'Hide navigation menu' : 'Open navigation menu'"
+          >
+            <mat-icon>{{ sidenavOpen() ? 'menu_open' : 'menu' }}</mat-icon>
+          </button>
+        }
+        <span class="dashboard__toolbar-title">Smart document processing</span>
+        <span class="dashboard__toolbar-spacer" aria-hidden="true"></span>
+        <button
+          mat-icon-button
+          type="button"
+          class="dashboard__theme-toggle"
+          (click)="toggleTheme()"
+          [attr.aria-label]="theme.isDark() ? 'Switch to light theme' : 'Switch to dark theme'"
+        >
+          <mat-icon>{{ theme.isDark() ? 'light_mode' : 'dark_mode' }}</mat-icon>
+        </button>
+      </mat-toolbar>
+      <main class="dashboard__main">
+        <router-outlet />
+      </main>
+    </mat-sidenav-content>
+  </mat-sidenav-container>
+
+    @if (!isMobile()) {
+      <button
+        type="button"
+        class="dashboard__collapse"
+        [class.dashboard__collapse--collapsed]="!sidenavOpen()"
+        (click)="toggleSidenav()"
+        [attr.aria-label]="sidenavOpen() ? 'Collapse sidebar' : 'Expand sidebar'"
+      >
+        @if (sidenavOpen()) {
+          <span class="dashboard__collapse-icon" aria-hidden="true">&lt;</span>
+        } @else {
+          <span class="dashboard__collapse-icon" aria-hidden="true">&gt;</span>
+        }
+      </button>
+    }
+  </div>
+</div>

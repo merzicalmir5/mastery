@@ -2,7 +2,7 @@
 
 @include mat.core();
 
-$mastery-theme: mat.define-theme(
+$mastery-light-theme: mat.define-theme(
   (
     color: (
       theme-type: light,
@@ -15,8 +15,71 @@ $mastery-theme: mat.define-theme(
   )
 );
 
+$mastery-dark-theme: mat.define-theme(
+  (
+    color: (
+      theme-type: dark,
+      primary: mat.$azure-palette,
+      tertiary: mat.$blue-palette,
+    ),
+    density: (
+      scale: 0,
+    ),
+  )
+);
+
 html {
-  @include mat.all-component-themes($mastery-theme);
+  color-scheme: light;
+  @include mat.all-component-themes($mastery-light-theme);
+
+  --app-text-primary: #000000;
+  --app-text-secondary: #000000;
+  --app-text-tertiary: #000000;
+  --app-page-bg: #f5f7fb;
+  --app-card-surface: #ffffff;
+  --dash-surface: #ffffff;
+  --dash-surface-muted: #fafbfc;
+  --dash-border: rgba(17, 24, 39, 0.14);
+  --dash-border-strong: rgba(17, 24, 39, 0.22);
+  --dash-nav-active-border: rgba(31, 111, 235, 0.45);
+  --dash-nav-active-bg: rgba(31, 111, 235, 0.08);
+  --dash-icon-muted: #000000;
+
+  --status-uploaded: #64748b;
+  --status-needs-review: #b45309;
+  --status-validated: #15803d;
+  --status-rejected: #b91c1c;
+  --status-issue: #b91c1c;
+  --status-warn: #92400e;
+  --issues-title: #991b1b;
+  --issues-body: rgba(17, 24, 39, 0.85);
+}
+
+html.theme-dark {
+  color-scheme: dark;
+  @include mat.all-component-colors($mastery-dark-theme);
+
+  --app-text-primary: #ffffff;
+  --app-text-secondary: #ffffff;
+  --app-text-tertiary: #ffffff;
+  --app-page-bg: #121212;
+  --app-card-surface: #1e1e1e;
+  --dash-surface: #1e1e1e;
+  --dash-surface-muted: #252525;
+  --dash-border: rgba(255, 255, 255, 0.12);
+  --dash-border-strong: rgba(255, 255, 255, 0.2);
+  --dash-nav-active-border: rgba(96, 165, 250, 0.55);
+  --dash-nav-active-bg: rgba(96, 165, 250, 0.12);
+  --dash-icon-muted: #ffffff;
+
+  --status-uploaded: #94a3b8;
+  --status-needs-review: #fbbf24;
+  --status-validated: #4ade80;
+  --status-rejected: #f87171;
+  --status-issue: #f87171;
+  --status-warn: #fbbf24;
+  --issues-title: #fca5a5;
+  --issues-body: rgba(255, 255, 255, 0.88);
 }
 
 html,
@@ -27,5 +90,30 @@ body {
 body {
   margin: 0;
   font-family: Roboto, 'Helvetica Neue', sans-serif;
-  background: #f5f7fb;
+  background: var(--app-page-bg);
+  color: var(--app-text-primary);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.mat-mdc-cell,
+.mat-mdc-header-cell {
+  color: var(--app-text-primary);
+}
+
+input.mat-mdc-input-element,
+textarea.mat-mdc-input-element {
+  color: var(--app-text-primary);
+  caret-color: var(--app-text-primary);
+}
+
+.mat-mdc-form-field:not(.mat-form-field-invalid) .mat-mdc-floating-label,
+.mat-mdc-form-field:not(.mat-form-field-invalid) .mdc-floating-label {
+  color: var(--app-text-primary);
+}
+
+.mat-mdc-form-field-hint-wrapper,
+.mat-mdc-form-field-error {
+  color: var(--app-text-primary);
 }

@@ -1,0 +1,70 @@
+<section class="register">
+  <mat-card class="register__card" appearance="outlined">
+    <form class="register__form" [formGroup]="registerForm" (ngSubmit)="submit()" novalidate>
+      <div class="register__brand">
+        <img class="register__logo" src="/assets/logo.png" alt="Mastery logo" />
+      </div>
+      <h1 class="register__title">Sign up</h1>
+
+      @if (errorMessage()) {
+        <p class="register__alert" role="alert">{{ errorMessage() }}</p>
+      }
+
+      <mat-form-field class="register__field" appearance="outline">
+        <input
+          matInput
+          type="text"
+          autocomplete="organization"
+          formControlName="companyName"
+          placeholder="Company"
+          aria-label="Company"
+        />
+        @if (registerForm.controls.companyName.touched && registerForm.controls.companyName.invalid) {
+          <mat-error>Company is required.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field class="register__field" appearance="outline">
+        <input
+          matInput
+          type="email"
+          autocomplete="email"
+          formControlName="email"
+          placeholder="Email"
+          aria-label="Email"
+        />
+        @if (registerForm.controls.email.touched && registerForm.controls.email.invalid) {
+          <mat-error>Valid email is required.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field class="register__field register__field--password" appearance="outline">
+        <input
+          matInput
+          [type]="hidePassword ? 'password' : 'text'"
+          autocomplete="new-password"
+          formControlName="password"
+          placeholder="Password"
+          aria-label="Password"
+        />
+        <button
+          mat-icon-button
+          matSuffix
+          type="button"
+          (click)="hidePassword = !hidePassword"
+          [attr.aria-label]="hidePassword ? 'Show password' : 'Hide password'"
+        >
+          <mat-icon>{{ hidePassword ? 'visibility' : 'visibility_off' }}</mat-icon>
+        </button>
+        @if (registerForm.controls.password.touched && registerForm.controls.password.invalid) {
+          <mat-error>Password must be at least 6 characters.</mat-error>
+        }
+      </mat-form-field>
+
+      <button class="register__submit" mat-flat-button type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Creating account…' : 'Sign up' }}
+      </button>
+      <a class="register__back-login" routerLink="/login">Back to login</a>
+    </form>
+  </mat-card>
+</section>

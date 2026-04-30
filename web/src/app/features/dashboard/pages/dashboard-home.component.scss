@@ -7,7 +7,7 @@
 
   &__subtitle {
     margin: 0 0 1.1rem;
-    color: rgba(17, 24, 39, 0.65);
+    color: var(--app-text-secondary);
     max-width: 52rem;
   }
 
@@ -25,7 +25,7 @@
 
   &__card-label {
     font-size: 0.82rem;
-    color: rgba(17, 24, 39, 0.65);
+    color: var(--app-text-secondary);
   }
 
   &__card-value {
@@ -37,7 +37,7 @@
   &__card-hint {
     margin-top: 0.35rem;
     font-size: 0.78rem;
-    color: rgba(17, 24, 39, 0.45);
+    color: var(--app-text-tertiary);
   }
 
   &__panel {
@@ -52,6 +52,6 @@
 
   &__panel-body {
     margin: 0;
-    color: rgba(17, 24, 39, 0.65);
+    color: var(--app-text-secondary);
   }
 }
