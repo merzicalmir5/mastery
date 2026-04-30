@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
@@ -60,9 +61,13 @@ export class DocumentUploadComponent {
         this.uploading.set(false);
         this.lastMessage.set(`Uploaded: ${created.fileName} (${created.id}). Status: ${created.status}.`);
       },
-      error: () => {
+      error: (err: unknown) => {
         this.uploading.set(false);
-        this.lastMessage.set('Upload failed. Check that you are logged in and the API is running.');
+        const message =
+          err instanceof HttpErrorResponse && typeof err.error?.message === 'string'
+            ? err.error.message
+            : 'Upload failed. Check that you are logged in and the API is running.';
+        this.lastMessage.set(message);
       },
     });
   }

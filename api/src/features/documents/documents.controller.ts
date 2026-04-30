@@ -2,8 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   DefaultValuePipe,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Patch,
@@ -75,5 +77,11 @@ export class DocumentsController {
   @Patch(':id')
   update(@Param('id') id: string, @CurrentUser() user: JwtUser, @Body() body: UpdateDocumentDto) {
     return this.documentsService.update(id, body, user);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(@Param('id') id: string, @CurrentUser() user: JwtUser): Promise<void> {
+    await this.documentsService.remove(id, user);
   }
 }

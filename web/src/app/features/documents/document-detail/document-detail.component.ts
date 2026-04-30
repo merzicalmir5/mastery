@@ -117,6 +117,29 @@ export class DocumentDetailComponent {
     void this.router.navigate(['/dashboard/documents']);
   }
 
+  save(): void {
+    const id = this.docId();
+    if (!id) {
+      return;
+    }
+    const v = this.form.getRawValue();
+    this.documents
+      .saveDocument(id, {
+        documentType: v.documentType,
+        supplierName: v.supplierName,
+        documentNumber: v.documentNumber,
+        issueDate: v.issueDate,
+        dueDate: v.dueDate,
+        currency: v.currency,
+        subtotal: Number(v.subtotal),
+        tax: Number(v.tax),
+        total: Number(v.total),
+      })
+      .subscribe({
+        next: () => void this.router.navigate(['/dashboard/documents']),
+      });
+  }
+
   confirm(): void {
     const id = this.docId();
     if (!id) {
@@ -146,6 +169,16 @@ export class DocumentDetailComponent {
       return;
     }
     this.documents.rejectDocument(id).subscribe({
+      next: () => void this.router.navigate(['/dashboard/documents']),
+    });
+  }
+
+  remove(): void {
+    const id = this.docId();
+    if (!id) {
+      return;
+    }
+    this.documents.deleteDocument(id).subscribe({
       next: () => void this.router.navigate(['/dashboard/documents']),
     });
   }
