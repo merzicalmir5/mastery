@@ -1,0 +1,168 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String               @id @default(uuid())
+  email           String               @unique
+  passwordHash    String
+  companyName     String
+  isEmailVerified Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  refreshTokens   RefreshToken[]
+  emailVerifies   EmailVerification[]
+  passwordResets  PasswordResetToken[]
+  documentsUploaded Document[]         @relation("DocumentsUploadedBy")
+  documentsReviewed Document[]         @relation("DocumentsReviewedBy")
+  documentRevisions DocumentRevision[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum DocumentType {
+  INVOICE
+  PURCHASE_ORDER
+}
+
+enum DocumentSourceType {
+  PDF
+  IMAGE
+  CSV
+  TXT
+}
+
+enum DocumentStatus {
+  UPLOADED
+  NEEDS_REVIEW
+  VALIDATED
+  REJECTED
+}
+
+enum ValidationSeverity {
+  ERROR
+  WARNING
+}
+
+model Document {
+  id                String                @id @default(uuid())
+  companyName       String
+  fileName          String
+  originalMimeType  String?
+  storagePath       String?
+  sourceType        DocumentSourceType
+  documentType      DocumentType?
+  documentNumber    String?
+  supplierName      String?
+  issueDate         DateTime?
+  dueDate           DateTime?
+  currency          String?
+  subtotal          Decimal?              @db.Decimal(18, 2)
+  tax               Decimal?              @db.Decimal(18, 2)
+  total             Decimal?              @db.Decimal(18, 2)
+  status            DocumentStatus        @default(UPLOADED)
+  rawExtractedData  Json?
+  finalData         Json?
+  ingestionNotes    String?
+  uploadedByUserId  String?
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  lineItems         DocumentLineItem[]
+  validationIssues  DocumentValidationIssue[]
+  revisions         DocumentRevision[]
+  uploadedBy        User?                 @relation("DocumentsUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  reviewedBy        User?                 @relation("DocumentsReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyName, status])
+  @@index([companyName, documentNumber])
+  @@index([uploadedByUserId])
+  @@index([reviewedByUserId])
+}
+
+model DocumentLineItem {
+  id             String    @id @default(uuid())
+  documentId     String
+  itemOrder      Int
+  description    String
+  quantity       Decimal   @db.Decimal(18, 4)
+  unitPrice      Decimal   @db.Decimal(18, 4)
+  lineTotal      Decimal   @db.Decimal(18, 2)
+  rawData        Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  document       Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@unique([documentId, itemOrder])
+}
+
+model DocumentValidationIssue {
+  id             String             @id @default(uuid())
+  documentId     String
+  fieldPath      String
+  code           String
+  message        String
+  severity       ValidationSeverity
+  isResolved     Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  resolvedAt     DateTime?
+  document       Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, severity])
+  @@index([documentId, isResolved])
+}
+
+model DocumentRevision {
+  id             String    @id @default(uuid())
+  documentId     String
+  editedByUserId String?
+  note           String?
+  beforeData     Json?
+  afterData      Json?
+  createdAt      DateTime  @default(now())
+  document       Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  editedByUser   User?     @relation(fields: [editedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([documentId, createdAt])
+  @@index([editedByUserId])
+}
