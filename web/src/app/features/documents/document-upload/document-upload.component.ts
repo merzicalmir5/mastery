@@ -16,9 +16,10 @@ export class DocumentUploadComponent {
   private readonly documents = inject(DocumentService);
 
   readonly acceptedHint =
-    'PDF, CSV, TXT, PNG, JPG — extraction runs after upload (mock registers row only).';
+    'PDF, CSV, TXT, PNG, JPG — files are saved on the server and extraction runs automatically.';
 
   readonly lastMessage = signal<string | null>(null);
+  readonly uploading = signal(false);
 
   readonly allowedExt = new Set(['.pdf', '.csv', '.txt', '.png', '.jpg', '.jpeg', '.webp']);
 
@@ -52,7 +53,17 @@ export class DocumentUploadComponent {
       this.lastMessage.set(`Unsupported file type: ${file.name}`);
       return;
     }
-    const created = this.documents.registerMockUpload({ fileName: file.name });
-    this.lastMessage.set(`Registered mock upload: ${created.fileName} (${created.id})`);
+    this.uploading.set(true);
+    this.lastMessage.set(null);
+    this.documents.uploadFile(file).subscribe({
+      next: (created) => {
+        this.uploading.set(false);
+        this.lastMessage.set(`Uploaded: ${created.fileName} (${created.id}). Status: ${created.status}.`);
+      },
+      error: () => {
+        this.uploading.set(false);
+        this.lastMessage.set('Upload failed. Check that you are logged in and the API is running.');
+      },
+    });
   }
 }

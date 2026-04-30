@@ -1,12 +1,12 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnDestroy, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 
 @Component({
@@ -25,9 +25,10 @@ import { AuthService } from '../../core/auth/auth.service';
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss',
 })
-export class LoginComponent {
+export class LoginComponent implements OnDestroy {
   private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthService);
 
   readonly loginForm = this.fb.nonNullable.group({
@@ -38,7 +39,27 @@ export class LoginComponent {
   hidePassword = true;
 
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly infoMessage = signal<string | null>(null);
   protected readonly submitting = signal(false);
+  private infoMessageTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    const shouldShowVerificationInfo = this.route.snapshot.queryParamMap.get('verifyEmail') === '1';
+    if (shouldShowVerificationInfo) {
+      this.infoMessage.set('Registration successful. Check your email and verify your account before login.');
+      this.infoMessageTimeoutId = setTimeout(() => {
+        this.infoMessage.set(null);
+        this.infoMessageTimeoutId = null;
+      }, 5000);
+    }
+  }
+
+  ngOnDestroy(): void {
+    if (this.infoMessageTimeoutId) {
+      clearTimeout(this.infoMessageTimeoutId);
+      this.infoMessageTimeoutId = null;
+    }
+  }
 
   submit(): void {
     if (this.loginForm.invalid) {

@@ -44,6 +44,23 @@
           <div class="doc-detail__cell">
             <mat-form-field
               class="doc-detail__field"
+              [class.doc-detail__field--issue]="hasIssue('documentType')"
+              appearance="outline"
+            >
+              <mat-label>Document type</mat-label>
+              <mat-select formControlName="documentType">
+                <mat-option value="INVOICE">Invoice</mat-option>
+                <mat-option value="PURCHASE_ORDER">Purchase order</mat-option>
+              </mat-select>
+            </mat-form-field>
+            @for (m of issuesForField('documentType'); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
+            }
+          </div>
+
+          <div class="doc-detail__cell">
+            <mat-form-field
+              class="doc-detail__field"
               [class.doc-detail__field--issue]="hasIssue('supplierName')"
               appearance="outline"
             >
@@ -162,7 +179,7 @@
         <p class="doc-detail__empty-lines">No line items.</p>
       } @else {
         <div class="doc-detail__table-wrap">
-          <table mat-table [dataSource]="doc()!.lineItems" class="doc-detail__lines">
+          <table mat-table [dataSource]="pagedLineItems()" class="doc-detail__lines">
             <ng-container matColumnDef="description">
               <th mat-header-cell *matHeaderCellDef>Description</th>
               <td mat-cell *matCellDef="let row">{{ row.description }}</td>
@@ -182,6 +199,33 @@
             <tr mat-header-row *matHeaderRowDef="lineColumns"></tr>
             <tr mat-row *matRowDef="let row; columns: lineColumns"></tr>
           </table>
+        </div>
+        <div class="doc-detail__pagination">
+          <div class="doc-detail__pagination-left">
+            <button mat-stroked-button type="button" (click)="prevLinesPage()" [disabled]="linesPage() <= 1">
+              Previous
+            </button>
+            <button
+              mat-stroked-button
+              type="button"
+              (click)="nextLinesPage()"
+              [disabled]="linesPage() >= lineTotalPages()"
+            >
+              Next
+            </button>
+          </div>
+          <div class="doc-detail__pagination-center">Page {{ linesPage() }} / {{ lineTotalPages() }}</div>
+          <div class="doc-detail__pagination-right">
+            <label class="doc-detail__page-size">
+              <span>Page size</span>
+              <select [value]="linesPageSize()" (change)="onLinesPageSizeChange($any($event.target).value)">
+                <option [value]="5">5</option>
+                <option [value]="10">10</option>
+                <option [value]="20">20</option>
+              </select>
+            </label>
+            <span class="doc-detail__total">Total {{ doc()!.lineItems.length }}</span>
+          </div>
         </div>
       }
       @if (hasIssue('lineItems')) {

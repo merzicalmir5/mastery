@@ -52,7 +52,9 @@ export class RegisterComponent {
     this.auth.register(companyName, email, password).subscribe({
       next: () => {
         this.submitting.set(false);
-        void this.router.navigateByUrl('/dashboard');
+        void this.router.navigate(['/login'], {
+          queryParams: { verifyEmail: '1' },
+        });
       },
       error: (err) => {
         this.submitting.set(false);

@@ -13,6 +13,10 @@ interface AuthSuccessResponse {
   tokens: AuthTokens;
 }
 
+interface RegisterSuccessResponse {
+  message: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
@@ -40,15 +44,12 @@ export class AuthService {
 
   register(companyName: string, email: string, password: string): Observable<void> {
     return this.http
-      .post<AuthSuccessResponse>(`${this.apiUrl}/auth/register`, {
+      .post<RegisterSuccessResponse>(`${this.apiUrl}/auth/register`, {
         companyName,
         email: email.trim().toLowerCase(),
         password,
       })
-      .pipe(
-        tap((res) => this.setTokens(res.tokens)),
-        map(() => undefined),
-      );
+      .pipe(map(() => undefined));
   }
 
   /** Calls API logout (Bearer + refresh body), then clears local tokens. */

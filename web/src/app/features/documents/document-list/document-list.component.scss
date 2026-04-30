@@ -96,4 +96,53 @@
     font-size: 0.82rem;
     line-height: 1.2;
   }
+
+  &__pagination {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid rgba(17, 24, 39, 0.1);
+    border-radius: 10px;
+    background: var(--app-card-surface);
+  }
+
+  &__pagination-left,
+  &__pagination-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  &__pagination-center {
+    font-size: 0.85rem;
+    color: var(--app-text-primary);
+    font-weight: 600;
+  }
+
+  &__page-size {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--app-text-secondary);
+  }
+
+  &__page-size select {
+    min-width: 3.25rem;
+    height: 2rem;
+    border: 1px solid rgba(17, 24, 39, 0.18);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--app-text-primary);
+    padding: 0 0.4rem;
+  }
+
+  &__total {
+    font-size: 0.82rem;
+    color: var(--app-text-secondary);
+  }
 }
