@@ -95,6 +95,17 @@ export class DocumentsService {
       throw new BadRequestException(`Unsupported extension: ${ext || '(none)'}`);
     }
 
+    const duplicate = await this.prisma.document.findFirst({
+      where: {
+        companyName: user.companyName,
+        fileName: file.originalname,
+      },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new BadRequestException('A document with the same file name already exists.');
+    }
+
     const id = randomUUID();
     const relDir = user.sub;
     const dir = path.join(this.uploadRoot, relDir);
@@ -202,10 +213,6 @@ export class DocumentsService {
       throw new NotFoundException('Document not found.');
     }
 
-    if (existing.status === DocumentStatus.VALIDATED || existing.status === DocumentStatus.REJECTED) {
-      throw new BadRequestException('Document is already finalized.');
-    }
-
     const data: Prisma.DocumentUpdateInput = {};
 
     if (dto.documentType !== undefined) {
@@ -260,6 +267,23 @@ export class DocumentsService {
     }
 
     return this.findOne(id, user);
+  }
+
+  async remove(id: string, user: JwtUser): Promise<void> {
+    const existing = await this.prisma.document.findFirst({
+      where: { id, companyName: user.companyName },
+      select: { id: true, storagePath: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Document not found.');
+    }
+
+    await this.prisma.document.delete({ where: { id } });
+
+    if (existing.storagePath) {
+      const absolutePath = path.join(this.uploadRoot, existing.storagePath);
+      await fs.unlink(absolutePath).catch(() => undefined);
+    }
   }
 
   private snapshotForFinal(
