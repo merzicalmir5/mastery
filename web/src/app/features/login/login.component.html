@@ -9,6 +9,9 @@
       @if (errorMessage()) {
         <p class="login__alert" role="alert">{{ errorMessage() }}</p>
       }
+      @if (infoMessage()) {
+        <p class="login__info" role="status">{{ infoMessage() }}</p>
+      }
 
       <mat-form-field class="login__field" appearance="outline">
         <input

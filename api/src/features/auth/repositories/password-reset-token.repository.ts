@@ -20,4 +20,10 @@ export class PasswordResetTokenRepository {
       data: { usedAt: new Date() },
     });
   }
+
+  deleteByUserId(userId: string): Promise<{ count: number }> {
+    return this.prisma.passwordResetToken.deleteMany({
+      where: { userId },
+    });
+  }
 }

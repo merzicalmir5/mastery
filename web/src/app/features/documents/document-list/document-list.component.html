@@ -1,6 +1,6 @@
 <section class="doc-list">
   <h1 class="doc-list__title">{{ pageTitle() }}</h1>
-  <p class="doc-list__subtitle">Mock data from DocumentService. Replace with API when ready.</p>
+  <p class="doc-list__subtitle">Documents for your company from the API.</p>
 
   @if (rows().length === 0) {
     <div class="doc-list__empty">No documents in this view.</div>
@@ -71,6 +71,34 @@
         <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
         <tr mat-row *matRowDef="let row; columns: displayedColumns" class="doc-list__row"></tr>
       </table>
+    </div>
+    <div class="doc-list__pagination">
+      <div class="doc-list__pagination-left">
+        <button mat-stroked-button type="button" (click)="prevPage()" [disabled]="page() <= 1">
+          Previous
+        </button>
+        <button
+          mat-stroked-button
+          type="button"
+          (click)="nextPage()"
+          [disabled]="page() >= pageMeta().totalPages"
+        >
+          Next
+        </button>
+      </div>
+      <div class="doc-list__pagination-center">Page {{ pageMeta().page }} / {{ pageMeta().totalPages }}</div>
+      <div class="doc-list__pagination-right">
+        <label class="doc-list__page-size">
+          <span>Page size</span>
+          <select [value]="pageSize()" (change)="onPageSizeChange($any($event.target).value)">
+            <option [value]="5">5</option>
+            <option [value]="10">10</option>
+            <option [value]="20">20</option>
+            <option [value]="50">50</option>
+          </select>
+        </label>
+        <span class="doc-list__total">Total {{ pageMeta().total }}</span>
+      </div>
     </div>
   }
 </section>

@@ -1,11 +1,13 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { FileLogger } from './core/logging/file-logger.service';
 import { PrismaService } from './core/prisma/prisma.service';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(new FileLogger('NestApplication'));
   app.enableCors({
     origin: process.env.FRONTEND_BASE_URL ?? 'http://localhost:4200',
     credentials: true,

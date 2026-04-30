@@ -55,6 +55,22 @@
     border-color: rgba(242, 184, 181, 0.25);
   }
 
+  &__info {
+    margin: 0 0 0.5rem;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: #0a4e24;
+    background: rgba(46, 125, 50, 0.1);
+    border: 1px solid rgba(46, 125, 50, 0.3);
+  }
+
+  :host-context(html.theme-dark) &__info {
+    color: #9be7a1;
+    background: rgba(155, 231, 161, 0.08);
+    border-color: rgba(155, 231, 161, 0.25);
+  }
+
   &__title {
     margin: 0 0 0.35rem;
     text-align: center;

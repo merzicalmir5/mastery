@@ -37,4 +37,10 @@ export class UserRepository {
       data: { passwordHash },
     });
   }
+
+  deleteById(id: string): Promise<User> {
+    return this.prisma.user.delete({
+      where: { id },
+    });
+  }
 }
