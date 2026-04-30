@@ -20,4 +20,10 @@ export class EmailVerificationRepository {
       data: { usedAt: new Date() },
     });
   }
+
+  deleteByUserId(userId: string): Promise<{ count: number }> {
+    return this.prisma.emailVerification.deleteMany({
+      where: { userId },
+    });
+  }
 }

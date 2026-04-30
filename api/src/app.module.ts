@@ -5,9 +5,16 @@ import { AppService } from './app.service';
 import { EmailModule } from './core/email/email.module';
 import { PrismaModule } from './core/prisma/prisma.module';
 import { AuthModule } from './features/auth/auth.module';
+import { DocumentsModule } from './features/documents/documents.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, EmailModule, AuthModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    EmailModule,
+    AuthModule,
+    DocumentsModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

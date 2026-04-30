@@ -27,5 +27,6 @@ import { UserRepository } from './repositories/user.repository';
     EmailVerificationRepository,
     PasswordResetTokenRepository,
   ],
+  exports: [JwtModule, JwtAuthGuard],
 })
 export class AuthModule {}

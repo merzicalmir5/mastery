@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  InternalServerErrorException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -21,6 +23,8 @@ import { UserRepository } from './repositories/user.repository';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
@@ -31,9 +35,12 @@ export class AuthService {
     private readonly emailService: EmailService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<{ message: string; tokens: AuthTokens }> {
+  async register(dto: RegisterDto): Promise<{ message: string }> {
+    const email = dto.email.toLowerCase();
+    this.logger.log(`register attempt email=${this.maskEmail(email)} company=${dto.companyName}`);
     const existing = await this.userRepository.findByEmail(dto.email.toLowerCase());
     if (existing) {
+      this.logger.warn(`register rejected duplicate email=${this.maskEmail(email)}`);
       throw new BadRequestException('Email is already registered.');
     }
 
@@ -50,27 +57,49 @@ export class AuthService {
       tokenHash: this.hashToken(verificationTokenRaw),
       expiresAt: this.addHours(24),
     });
-    await this.emailService.sendRegistrationConfirmation(user.email, verificationTokenRaw);
+    try {
+      await this.emailService.sendRegistrationConfirmation(user.email, verificationTokenRaw);
+    } catch (error) {
+      // Keep registration consistent: if mail failed, remove created user + tokens.
+      await this.refreshTokenRepository.deleteByUserId(user.id);
+      await this.emailVerificationRepository.deleteByUserId(user.id);
+      await this.passwordResetTokenRepository.deleteByUserId(user.id);
+      await this.userRepository.deleteById(user.id);
+      this.logger.error(
+        `register rolled back: failed to send confirmation email for userId=${user.id} email=${this.maskEmail(user.email)} error=${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Registration failed because confirmation email could not be sent.',
+      );
+    }
 
-    const tokens = await this.issueTokens(user.id, user.email, user.companyName);
+    this.logger.log(`register success userId=${user.id} email=${this.maskEmail(user.email)}`);
     return {
       message: 'Registration successful. Verification email has been sent.',
-      tokens,
     };
   }
 
   async login(dto: LoginDto): Promise<{ message: string; tokens: AuthTokens }> {
-    const user = await this.userRepository.findByEmail(dto.email.toLowerCase());
+    const email = dto.email.toLowerCase();
+    this.logger.log(`login attempt email=${this.maskEmail(email)}`);
+    const user = await this.userRepository.findByEmail(email);
     if (!user) {
+      this.logger.warn(`login failed user-not-found email=${this.maskEmail(email)}`);
       throw new UnauthorizedException('Invalid credentials.');
     }
 
     const validPassword = await bcrypt.compare(dto.password, user.passwordHash);
     if (!validPassword) {
+      this.logger.warn(`login failed bad-password userId=${user.id} email=${this.maskEmail(email)}`);
       throw new UnauthorizedException('Invalid credentials.');
+    }
+    if (!user.isEmailVerified) {
+      this.logger.warn(`login failed email-not-verified userId=${user.id} email=${this.maskEmail(email)}`);
+      throw new UnauthorizedException('Please verify your email before logging in.');
     }
 
     const tokens = await this.issueTokens(user.id, user.email, user.companyName);
+    this.logger.log(`login success userId=${user.id} email=${this.maskEmail(email)}`);
     return {
       message: 'Login successful.',
       tokens,
@@ -78,23 +107,29 @@ export class AuthService {
   }
 
   async refresh(dto: RefreshTokenDto): Promise<AuthTokens> {
+    this.logger.log('refresh token attempt');
     const tokenHash = this.hashToken(dto.refreshToken);
     const persisted = await this.refreshTokenRepository.findByTokenHash(tokenHash);
     if (!persisted || persisted.expiresAt.getTime() < Date.now()) {
+      this.logger.warn('refresh failed invalid-or-expired token');
       throw new UnauthorizedException('Refresh token is invalid or expired.');
     }
 
     const user = await this.userRepository.findById(persisted.userId);
     if (!user) {
+      this.logger.warn(`refresh failed user-not-found userId=${persisted.userId}`);
       throw new UnauthorizedException('User not found.');
     }
 
     await this.refreshTokenRepository.deleteById(persisted.id);
+    this.logger.log(`refresh success userId=${user.id}`);
     return this.issueTokens(user.id, user.email, user.companyName);
   }
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
-    const user = await this.userRepository.findByEmail(dto.email.toLowerCase());
+    const email = dto.email.toLowerCase();
+    this.logger.log(`forgot-password requested email=${this.maskEmail(email)}`);
+    const user = await this.userRepository.findByEmail(email);
     if (user) {
       const tokenRaw = randomBytes(32).toString('hex');
       await this.passwordResetTokenRepository.create({
@@ -103,6 +138,9 @@ export class AuthService {
         expiresAt: this.addHours(1),
       });
       await this.emailService.sendPasswordReset(user.email, tokenRaw);
+      this.logger.log(`forgot-password token created userId=${user.id}`);
+    } else {
+      this.logger.log(`forgot-password no-user email=${this.maskEmail(email)}`);
     }
 
     return {
@@ -111,9 +149,11 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    this.logger.log('reset-password attempt');
     const tokenHash = this.hashToken(dto.token);
     const reset = await this.passwordResetTokenRepository.findByTokenHash(tokenHash);
     if (!reset || reset.usedAt || reset.expiresAt.getTime() < Date.now()) {
+      this.logger.warn('reset-password failed invalid-or-expired token');
       throw new BadRequestException('Reset token is invalid or expired.');
     }
 
@@ -121,6 +161,7 @@ export class AuthService {
     await this.userRepository.updatePassword(reset.userId, passwordHash);
     await this.passwordResetTokenRepository.markUsed(reset.id);
     await this.refreshTokenRepository.deleteByUserId(reset.userId);
+    this.logger.log(`reset-password success userId=${reset.userId}`);
 
     return {
       message: 'Password has been reset successfully.',
@@ -128,14 +169,17 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<{ message: string }> {
+    this.logger.log('verify-email attempt');
     const tokenHash = this.hashToken(token);
     const verification = await this.emailVerificationRepository.findByTokenHash(tokenHash);
     if (!verification || verification.usedAt || verification.expiresAt.getTime() < Date.now()) {
+      this.logger.warn('verify-email failed invalid-or-expired token');
       throw new BadRequestException('Verification token is invalid or expired.');
     }
 
     await this.userRepository.markEmailVerified(verification.userId);
     await this.emailVerificationRepository.markUsed(verification.id);
+    this.logger.log(`verify-email success userId=${verification.userId}`);
 
     return {
       message: 'Email verification successful.',
@@ -143,10 +187,14 @@ export class AuthService {
   }
 
   async logout(refreshToken: string): Promise<{ message: string }> {
+    this.logger.log('logout attempt');
     const tokenHash = this.hashToken(refreshToken);
     const token = await this.refreshTokenRepository.findByTokenHash(tokenHash);
     if (token) {
       await this.refreshTokenRepository.deleteById(token.id);
+      this.logger.log(`logout success userId=${token.userId}`);
+    } else {
+      this.logger.log('logout token-not-found');
     }
     return {
       message: 'Logged out successfully.',
@@ -174,7 +222,20 @@ export class AuthService {
       expiresAt: this.computeFutureDate(refreshExpiresIn),
     });
 
+    this.logger.log(`tokens issued userId=${userId} email=${this.maskEmail(email)}`);
+
     return { accessToken, refreshToken };
+  }
+
+  private maskEmail(email: string): string {
+    const [name, domain] = email.split('@');
+    if (!name || !domain) {
+      return 'invalid-email';
+    }
+    if (name.length <= 2) {
+      return `${name[0] ?? '*'}***@${domain}`;
+    }
+    return `${name.slice(0, 2)}***@${domain}`;
   }
 
   private hashToken(token: string): string {
