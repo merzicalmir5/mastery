@@ -224,6 +224,31 @@ export class DocumentService {
       );
   }
 
+  saveDocument(
+    id: string,
+    fields: {
+      documentType: 'INVOICE' | 'PURCHASE_ORDER';
+      supplierName: string;
+      documentNumber: string;
+      issueDate: string;
+      dueDate: string;
+      currency: string;
+      subtotal: number;
+      tax: number;
+      total: number;
+    },
+  ): Observable<void> {
+    return this.http
+      .patch<DocumentApiRow>(`${this.apiUrl}/documents/${id}`, {
+        ...fields,
+        action: 'save',
+      })
+      .pipe(
+        tap((row) => this.upsert(mapRow(row))),
+        map(() => undefined),
+      );
+  }
+
   rejectDocument(id: string): Observable<void> {
     return this.http
       .patch<DocumentApiRow>(`${this.apiUrl}/documents/${id}`, { action: 'reject' })
@@ -231,6 +256,13 @@ export class DocumentService {
         tap((row) => this.upsert(mapRow(row))),
         map(() => undefined),
       );
+  }
+
+  deleteDocument(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}/documents/${id}`).pipe(
+      tap(() => this.removeFromStore(id)),
+      map(() => undefined),
+    );
   }
 
   private upsert(rec: DocumentRecord): void {
@@ -243,5 +275,9 @@ export class DocumentService {
       next[i] = rec;
       return next;
     });
+  }
+
+  private removeFromStore(id: string): void {
+    this._store.update((rows) => rows.filter((r) => r.id !== id));
   }
 }

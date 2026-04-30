@@ -42,3 +42,7 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+.vercel
+
+# Generated at build time from API_URL (see scripts/write-api-env.mjs)
+src/environments/environment.prod.generated.ts

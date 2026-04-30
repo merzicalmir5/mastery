@@ -15,11 +15,15 @@
       </div>
       <div class="doc-detail__actions">
         <button mat-stroked-button type="button" (click)="back()">Back</button>
+        <button mat-stroked-button type="button" (click)="save()">Save</button>
         <button mat-flat-button color="primary" type="button" (click)="confirm()">
           Confirm
         </button>
         <button mat-stroked-button color="warn" type="button" (click)="reject()">
           Reject
+        </button>
+        <button mat-stroked-button color="warn" type="button" (click)="remove()">
+          Delete
         </button>
       </div>
     </div>
