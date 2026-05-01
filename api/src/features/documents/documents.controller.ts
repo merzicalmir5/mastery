@@ -11,12 +11,13 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../core/auth/jwt-auth.guard';
 import type { Express } from 'express';
 
@@ -67,6 +68,22 @@ export class DocumentsController {
     @Query('status') status?: string,
   ) {
     return this.documentsService.findAllForUser(user, { page, pageSize, status });
+  }
+
+  @Get(':id/file')
+  @ApiProduces('application/octet-stream', 'application/pdf', 'image/png', 'text/plain', 'text/csv')
+  async getOriginalFile(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtUser,
+    @Query('download') download?: string,
+  ): Promise<StreamableFile> {
+    const { stream, contentType, fileName } = await this.documentsService.getFileStream(id, user);
+    const asciiName = this.documentsService.dispositionFilename(fileName);
+    const attach = download === 'true' || download === '1';
+    return new StreamableFile(stream, {
+      type: contentType,
+      disposition: `${attach ? 'attachment' : 'inline'}; filename="${asciiName}"`,
+    });
   }
 
   @Get(':id')
