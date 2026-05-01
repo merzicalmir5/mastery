@@ -32,6 +32,44 @@
     margin-top: 0.35rem;
     font-size: 1.6rem;
     font-weight: 700;
+    color: var(--app-text-primary);
+
+    &--neutral {
+      color: var(--app-text-primary);
+    }
+
+    &--needs_review {
+      color: var(--status-needs-review);
+    }
+
+    &--validated {
+      color: var(--status-validated);
+    }
+
+    &--rejected {
+      color: var(--status-rejected);
+    }
+  }
+
+  &__status {
+    font-size: 0.85rem;
+    font-weight: 600;
+
+    &--uploaded {
+      color: var(--status-uploaded);
+    }
+
+    &--needs_review {
+      color: var(--status-needs-review);
+    }
+
+    &--validated {
+      color: var(--status-validated);
+    }
+
+    &--rejected {
+      color: var(--status-rejected);
+    }
   }
 
   &__card-hint {
@@ -53,6 +91,23 @@
   &__panel-body {
     margin: 0;
     color: var(--app-text-secondary);
+  }
+
+  &__panel-note {
+    margin-bottom: 0.75rem !important;
+    font-size: 0.85rem;
+    max-width: 48rem;
+  }
+
+  &__currency-table {
+    width: 100%;
+    max-width: 28rem;
+  }
+
+  &__delete {
+    border-radius: 8px !important;
+    font-size: 0.82rem;
+    line-height: 1.2;
   }
 
   &__pagination {

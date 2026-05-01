@@ -28,6 +28,8 @@
       </div>
     </div>
 
+    <app-document-file-preview [documentId]="doc()!.id" [fileName]="doc()!.fileName" />
+
     @if (doc()!.validationIssues.length) {
       <mat-card class="doc-detail__issues" appearance="outlined">
         <div class="doc-detail__issues-title">Validation issues</div>
@@ -41,9 +43,9 @@
       </mat-card>
     }
 
-    <mat-card class="doc-detail__card" appearance="outlined">
-      <div class="doc-detail__card-title">Extracted fields</div>
-      <form class="doc-detail__form" [formGroup]="form" (ngSubmit)="confirm()">
+    <form class="doc-detail__stack" [formGroup]="form" (ngSubmit)="confirm()">
+      <mat-card class="doc-detail__card" appearance="outlined">
+        <div class="doc-detail__card-title">Extracted fields</div>
         <div class="doc-detail__grid">
           <div class="doc-detail__cell">
             <mat-form-field
@@ -174,67 +176,83 @@
             }
           </div>
         </div>
-      </form>
-    </mat-card>
+      </mat-card>
 
-    <mat-card class="doc-detail__card" appearance="outlined">
-      <div class="doc-detail__card-title">Line items</div>
-      @if (doc()!.lineItems.length === 0) {
-        <p class="doc-detail__empty-lines">No line items.</p>
-      } @else {
-        <div class="doc-detail__table-wrap">
-          <table mat-table [dataSource]="pagedLineItems()" class="doc-detail__lines">
-            <ng-container matColumnDef="description">
-              <th mat-header-cell *matHeaderCellDef>Description</th>
-              <td mat-cell *matCellDef="let row">{{ row.description }}</td>
-            </ng-container>
-            <ng-container matColumnDef="quantity">
-              <th mat-header-cell *matHeaderCellDef>Qty</th>
-              <td mat-cell *matCellDef="let row">{{ row.quantity }}</td>
-            </ng-container>
-            <ng-container matColumnDef="unitPrice">
-              <th mat-header-cell *matHeaderCellDef>Unit</th>
-              <td mat-cell *matCellDef="let row">{{ row.unitPrice }}</td>
-            </ng-container>
-            <ng-container matColumnDef="lineTotal">
-              <th mat-header-cell *matHeaderCellDef>Line total</th>
-              <td mat-cell *matCellDef="let row">{{ row.lineTotal }}</td>
-            </ng-container>
-            <tr mat-header-row *matHeaderRowDef="lineColumns"></tr>
-            <tr mat-row *matRowDef="let row; columns: lineColumns"></tr>
-          </table>
+      <mat-card class="doc-detail__card" appearance="outlined">
+        <div class="doc-detail__card-head">
+          <div class="doc-detail__card-title">Line items</div>
+          <button mat-stroked-button type="button" (click)="addLine()">Add line</button>
         </div>
-        <div class="doc-detail__pagination">
-          <div class="doc-detail__pagination-left">
-            <button mat-stroked-button type="button" (click)="prevLinesPage()" [disabled]="linesPage() <= 1">
-              Previous
-            </button>
-            <button
-              mat-stroked-button
-              type="button"
-              (click)="nextLinesPage()"
-              [disabled]="linesPage() >= lineTotalPages()"
-            >
-              Next
-            </button>
-          </div>
-          <div class="doc-detail__pagination-center">Page {{ linesPage() }} / {{ lineTotalPages() }}</div>
-          <div class="doc-detail__pagination-right">
-            <label class="doc-detail__page-size">
-              <span>Page size</span>
-              <select [value]="linesPageSize()" (change)="onLinesPageSizeChange($any($event.target).value)">
-                <option [value]="5">5</option>
-                <option [value]="10">10</option>
-                <option [value]="20">20</option>
-              </select>
-            </label>
-            <span class="doc-detail__total">Total {{ doc()!.lineItems.length }}</span>
-          </div>
+
+        <p class="doc-detail__lines-hint">
+          Rows without a description are ignored when you save. Use Save or Confirm to persist changes.
+        </p>
+
+        <div class="doc-detail__lines-edit" formArrayName="lineItems">
+          @for (ctrl of lineItemsArray.controls; track $index; let i = $index) {
+            <div class="doc-detail__line-row" [formGroupName]="i">
+              <mat-form-field
+                class="doc-detail__line-field doc-detail__line-field--desc"
+                [class.doc-detail__field--issue]="hasLineIssue(i)"
+                appearance="outline"
+              >
+                <mat-label>Description</mat-label>
+                <input matInput formControlName="description" />
+              </mat-form-field>
+              <mat-form-field
+                class="doc-detail__line-field"
+                [class.doc-detail__field--issue]="hasLineIssue(i)"
+                appearance="outline"
+              >
+                <mat-label>Qty</mat-label>
+                <input matInput type="number" formControlName="quantity" />
+              </mat-form-field>
+              <mat-form-field
+                class="doc-detail__line-field"
+                [class.doc-detail__field--issue]="hasLineIssue(i)"
+                appearance="outline"
+              >
+                <mat-label>Unit</mat-label>
+                <input matInput type="number" formControlName="unitPrice" />
+              </mat-form-field>
+              <mat-form-field
+                class="doc-detail__line-field"
+                [class.doc-detail__field--issue]="hasLineIssue(i)"
+                appearance="outline"
+              >
+                <mat-label>Line total</mat-label>
+                <input matInput type="number" formControlName="lineTotal" />
+              </mat-form-field>
+              <button
+                mat-stroked-button
+                type="button"
+                class="doc-detail__line-remove"
+                (click)="removeLine(i)"
+              >
+                Remove
+              </button>
+            </div>
+            @for (m of issuesForLineIndex(i); track m) {
+              <div class="doc-detail__msg doc-detail__msg--error doc-detail__msg--line">{{ m }}</div>
+            }
+          }
         </div>
-      }
-      @if (hasIssue('lineItems')) {
-        <p class="doc-detail__line-issue">{{ issuesForField('lineItems').join(' ') }}</p>
-      }
-    </mat-card>
+
+        @if (lineItemsArray.length === 0) {
+          <p class="doc-detail__empty-lines">
+            @if (doc()!.lineItems.length === 0) {
+              No line items were extracted from this file (common for messy PDFs or scans). Use
+              <strong>Add line</strong> to type the table manually, or fix the source and re-upload.
+            } @else {
+              Loading line items…
+            }
+          </p>
+        }
+
+        @if (hasIssue('lineItems')) {
+          <p class="doc-detail__line-issue">{{ issuesForField('lineItems').join(' ') }}</p>
+        }
+      </mat-card>
+    </form>
   </section>
 }

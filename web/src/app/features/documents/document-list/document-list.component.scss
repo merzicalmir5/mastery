@@ -29,7 +29,7 @@
 
   &__table {
     width: 100%;
-    min-width: 720px;
+    min-width: 800px;
   }
 
   &__row:hover {
@@ -91,7 +91,15 @@
     color: var(--app-text-primary);
   }
 
-  &__open {
+  &__actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  &__open,
+  &__delete {
     border-radius: 8px !important;
     font-size: 0.82rem;
     line-height: 1.2;

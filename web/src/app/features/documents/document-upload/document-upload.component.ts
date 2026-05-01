@@ -3,13 +3,22 @@ import { Component, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { RouterLink } from '@angular/router';
+import { DocumentFilePreviewComponent } from '../document-file-preview/document-file-preview.component';
 import { DocumentService } from '../services/document.service';
 
 @Component({
   selector: 'app-document-upload',
   standalone: true,
-  imports: [CommonModule, RouterLink, MatButtonModule, MatIconModule],
+  imports: [
+    CommonModule,
+    RouterLink,
+    MatButtonModule,
+    MatIconModule,
+    MatProgressSpinnerModule,
+    DocumentFilePreviewComponent,
+  ],
   templateUrl: './document-upload.component.html',
   styleUrl: './document-upload.component.scss',
 })
@@ -21,6 +30,9 @@ export class DocumentUploadComponent {
 
   readonly lastMessage = signal<string | null>(null);
   readonly uploading = signal(false);
+  /** After a successful upload, drive preview + link to full review. */
+  readonly lastUploadedId = signal<string | null>(null);
+  readonly lastUploadedFileName = signal<string>('');
 
   readonly allowedExt = new Set(['.pdf', '.csv', '.txt', '.png', '.jpg', '.jpeg', '.webp']);
 
@@ -31,6 +43,14 @@ export class DocumentUploadComponent {
       this.handleFile(file);
     }
     input.value = '';
+  }
+
+  onZoneKeyActivate(ev: Event, input: HTMLInputElement): void {
+    if (this.uploading()) {
+      return;
+    }
+    ev.preventDefault();
+    input.click();
   }
 
   onDragOver(event: DragEvent): void {
@@ -48,6 +68,9 @@ export class DocumentUploadComponent {
   }
 
   private handleFile(file: File): void {
+    if (this.uploading()) {
+      return;
+    }
     const lower = file.name.toLowerCase();
     const ok = [...this.allowedExt].some((ext) => lower.endsWith(ext));
     if (!ok) {
@@ -56,9 +79,12 @@ export class DocumentUploadComponent {
     }
     this.uploading.set(true);
     this.lastMessage.set(null);
+    this.lastUploadedId.set(null);
     this.documents.uploadFile(file).subscribe({
       next: (created) => {
         this.uploading.set(false);
+        this.lastUploadedId.set(created.id);
+        this.lastUploadedFileName.set(created.fileName);
         this.lastMessage.set(`Uploaded: ${created.fileName} (${created.id}). Status: ${created.status}.`);
       },
       error: (err: unknown) => {

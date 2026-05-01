@@ -1,20 +1,24 @@
+import { CommonModule, DecimalPipe, SlicePipe } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
-import { SlicePipe } from '@angular/common';
+import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatTableModule } from '@angular/material/table';
-import type { DocumentStatus } from '../../documents/models/document.models';
+import type { DocumentRecord, DocumentStatus } from '../../documents/models/document.models';
 import { DocumentService } from '../../documents/services/document.service';
+
+type DashboardStatTone = 'neutral' | 'needs_review' | 'validated' | 'rejected';
 
 @Component({
   selector: 'app-dashboard-home',
   standalone: true,
-  imports: [MatCardModule, MatTableModule, SlicePipe],
+  imports: [CommonModule, MatCardModule, MatTableModule, MatButtonModule, SlicePipe, DecimalPipe],
   templateUrl: './dashboard-home.component.html',
   styleUrl: './dashboard-home.component.scss',
 })
 export class DashboardHomeComponent implements OnInit {
   private readonly documents = inject(DocumentService);
-  readonly displayedColumns = ['fileName', 'status', 'issues', 'updatedAt'];
+  readonly displayedColumns = ['fileName', 'status', 'issues', 'updatedAt', 'actions'];
+  readonly currencyColumns = ['currency', 'total'];
   readonly page = signal(1);
   readonly pageSize = signal(5);
 
@@ -22,11 +26,21 @@ export class DashboardHomeComponent implements OnInit {
     this.documents.data();
     const c = this.documents.summaryCounts();
     return [
-      { label: 'Total documents', value: String(c.total), hint: 'All statuses' },
-      { label: 'Needs review', value: String(c.needsReview), hint: 'Validation issues' },
-      { label: 'Validated', value: String(c.validated), hint: 'Confirmed' },
-      { label: 'Rejected', value: String(c.rejected), hint: 'Final' },
-    ];
+      { label: 'Total documents', value: String(c.total), hint: 'All statuses', tone: 'neutral' as const },
+      {
+        label: 'Needs review',
+        value: String(c.needsReview),
+        hint: 'Validation issues',
+        tone: 'needs_review' as const,
+      },
+      { label: 'Validated', value: String(c.validated), hint: 'Confirmed', tone: 'validated' as const },
+      { label: 'Rejected', value: String(c.rejected), hint: 'Final', tone: 'rejected' as const },
+    ] satisfies ReadonlyArray<{
+      label: string;
+      value: string;
+      hint: string;
+      tone: DashboardStatTone;
+    }>;
   });
 
   readonly recentDocuments = computed(() => {
@@ -40,6 +54,22 @@ export class DashboardHomeComponent implements OnInit {
     return this.documents.list().length;
   });
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalRows() / this.pageSize())));
+
+  /** Sum of stored `total` per currency for documents currently in the list (up to pageSize 100 on load). */
+  readonly totalsByCurrency = computed(() => {
+    this.documents.data();
+    const map = new Map<string, number>();
+    for (const d of this.documents.list()) {
+      const cur = d.currency?.trim();
+      if (!cur) {
+        continue;
+      }
+      map.set(cur, (map.get(cur) ?? 0) + Number(d.total));
+    }
+    return [...map.entries()]
+      .map(([currency, total]) => ({ currency, total }))
+      .sort((a, b) => a.currency.localeCompare(b.currency));
+  });
 
   statusLabel(status: DocumentStatus): string {
     const map: Record<DocumentStatus, string> = {
@@ -76,5 +106,18 @@ export class DashboardHomeComponent implements OnInit {
       return;
     }
     this.page.update((v) => v + 1);
+  }
+
+  delete(row: DocumentRecord): void {
+    this.documents.deleteDocument(row.id).subscribe({
+      next: () => {
+        this.documents.refresh({ page: 1, pageSize: 100 }).subscribe(() => {
+          const maxPage = this.totalPages();
+          if (this.page() > maxPage) {
+            this.page.set(maxPage);
+          }
+        });
+      },
+    });
   }
 }

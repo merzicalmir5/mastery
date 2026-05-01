@@ -2,6 +2,8 @@ export type DocumentStatus = 'uploaded' | 'needs_review' | 'validated' | 'reject
 
 export type DocumentKind = 'invoice' | 'purchase_order';
 
+export type DocumentSourceType = 'PDF' | 'IMAGE' | 'CSV' | 'TXT';
+
 export interface ValidationIssue {
   field: string;
   severity: 'error' | 'warning';
@@ -19,6 +21,8 @@ export interface LineItem {
 export interface DocumentRecord {
   id: string;
   fileName: string;
+  sourceType: DocumentSourceType;
+  originalMimeType: string | null;
   documentKind: DocumentKind;
   supplierName: string;
   documentNumber: string;
