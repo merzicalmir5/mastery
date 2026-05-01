@@ -47,7 +47,7 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        API_URL: http://localhost:3000
+        API_URL: ${API_URL:-http://localhost:3000}
     container_name: mastery-web
     restart: unless-stopped
     depends_on:

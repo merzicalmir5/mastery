@@ -3,6 +3,7 @@ WORKDIR /app
 
 FROM base AS deps
 COPY package*.json ./
+COPY prisma ./prisma
 RUN npm ci
 
 FROM deps AS build
