@@ -73,6 +73,18 @@ export type PaginatedResult<T> = {
 
 @Injectable()
 export class DocumentsService {
+  private static readonly ALLOWED_MIME_BY_EXT: Record<string, readonly string[]> = {
+    '.pdf': ['application/pdf'],
+    '.csv': ['text/csv', 'application/csv', 'application/vnd.ms-excel', 'text/plain'],
+    '.txt': ['text/plain', 'application/octet-stream'],
+    '.png': ['image/png'],
+    '.jpg': ['image/jpeg'],
+    '.jpeg': ['image/jpeg'],
+    '.webp': ['image/webp'],
+    '.gif': ['image/gif'],
+    '.bmp': ['image/bmp'],
+  };
+
   private readonly uploadRoot: string;
 
   constructor(
@@ -95,11 +107,12 @@ export class DocumentsService {
     } catch {
       throw new BadRequestException(`Unsupported extension: ${ext || '(none)'}`);
     }
+    this.assertMimeAllowed(ext, file.mimetype);
 
     const duplicate = await this.prisma.document.findFirst({
       where: {
         companyName: user.companyName,
-        fileName: file.originalname,
+        fileName: path.basename(file.originalname),
       },
       select: { id: true },
     });
@@ -108,7 +121,7 @@ export class DocumentsService {
     }
 
     const id = randomUUID();
-    const relDir = user.sub;
+    const relDir = this.safePathSegment(user.sub);
     const dir = path.join(this.uploadRoot, relDir);
     await fs.mkdir(dir, { recursive: true });
     const storedFileName = `${id}${ext}`;
@@ -125,20 +138,42 @@ export class DocumentsService {
       size: file.size,
     });
 
-    await this.prisma.document.create({
-      data: {
-        id,
-        companyName: user.companyName,
-        fileName: file.originalname,
-        originalMimeType: file.mimetype,
-        storagePath,
-        sourceType,
-        uploadedByUserId: user.sub,
-        status: DocumentStatus.UPLOADED,
-      },
-    });
+    const originalName = path.basename(file.originalname);
+    try {
+      await this.prisma.document.create({
+        data: {
+          id,
+          companyName: user.companyName,
+          fileName: originalName,
+          originalMimeType: file.mimetype,
+          storagePath,
+          sourceType,
+          uploadedByUserId: user.sub,
+          status: DocumentStatus.UPLOADED,
+        },
+      });
+    } catch (error) {
+      await fs.unlink(absolutePath).catch(() => undefined);
+      throw error;
+    }
 
-    await this.processDocument(id, absolutePath, sourceType);
+    try {
+      await this.processDocument(id, absolutePath, sourceType);
+    } catch (error) {
+      console.error('[documents.upload] automatic extraction failed', {
+        id,
+        sourceType,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.prisma.document.update({
+        where: { id },
+        data: {
+          status: DocumentStatus.NEEDS_REVIEW,
+          ingestionNotes:
+            'Automatic extraction failed. Please review and fill fields manually before confirming.',
+        },
+      });
+    }
     return this.findOne(id, user);
   }
 
@@ -484,6 +519,25 @@ export class DocumentsService {
       return DocumentSourceType.TXT;
     }
     throw new Error('bad ext');
+  }
+
+  private assertMimeAllowed(ext: string, mimeType: string | undefined): void {
+    const allowed = DocumentsService.ALLOWED_MIME_BY_EXT[ext];
+    if (!allowed || allowed.length === 0) {
+      throw new BadRequestException(`Unsupported extension: ${ext || '(none)'}`);
+    }
+    const normalized = (mimeType ?? '').toLowerCase().trim();
+    if (!normalized) {
+      throw new BadRequestException('Missing file MIME type.');
+    }
+    if (!allowed.includes(normalized)) {
+      throw new BadRequestException(`Unsupported file MIME type "${mimeType}" for extension "${ext}".`);
+    }
+  }
+
+  private safePathSegment(value: string): string {
+    const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, '_').trim();
+    return sanitized || 'unknown-user';
   }
 
   private mapStatusFilter(status?: string): DocumentStatus | undefined {
