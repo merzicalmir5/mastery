@@ -1,0 +1,36 @@
+<mat-card class="file-preview" [class.file-preview--compact]="compact()" appearance="outlined">
+  <div class="file-preview__head">
+    <span class="file-preview__title">Original file</span>
+    <button mat-stroked-button type="button" (click)="download()">Download</button>
+  </div>
+
+  @if (loadError()) {
+    <p class="file-preview__err">Could not load the file from the server. You can still try Download.</p>
+  } @else {
+    @if (!previewBlobUrl() && previewKind() === 'unknown' && !loadError()) {
+      <p class="file-preview__loading">Loading preview…</p>
+    }
+    @switch (previewKind()) {
+      @case ('pdf') {
+        @if (safeIframeSrc(); as src) {
+          <iframe [src]="src" class="file-preview__iframe" title="PDF preview"></iframe>
+        }
+      }
+      @case ('image') {
+        @if (safeImageSrc(); as imgSrc) {
+          <img [src]="imgSrc" class="file-preview__img" alt="Uploaded image preview" />
+        }
+      }
+      @case ('text') {
+        <pre class="file-preview__pre">{{ previewText() }}</pre>
+      }
+      @default {
+        @if (previewBlobUrl()) {
+          <p class="file-preview__fallback">
+            No embedded preview for this type in the browser. Use Download to open the file locally.
+          </p>
+        }
+      }
+    }
+  }
+</mat-card>

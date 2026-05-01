@@ -117,4 +117,28 @@ export class DocumentListComponent implements OnInit {
       })
       .subscribe();
   }
+
+  delete(row: DocumentRecord): void {
+    this.documents.deleteDocument(row.id).subscribe({
+      next: () => {
+        this.documents
+          .refresh({
+            page: this.page(),
+            pageSize: this.pageSize(),
+            status: this.statusFilter(),
+          })
+          .subscribe(() => {
+            const meta = this.pageMeta();
+            if (meta.total === 0) {
+              return;
+            }
+            if (this.page() > meta.totalPages) {
+              this.loadPage(Math.max(1, meta.totalPages));
+            } else if (this.rows().length === 0 && this.page() > 1) {
+              this.loadPage(this.page() - 1);
+            }
+          });
+      },
+    });
+  }
 }

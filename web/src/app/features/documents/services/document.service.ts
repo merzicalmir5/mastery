@@ -2,7 +2,13 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, map, tap } from 'rxjs';
 import { API_URL } from '../../../core/config/api-url.token';
-import type { DocumentKind, DocumentRecord, DocumentStatus, ValidationIssue } from '../models/document.models';
+import type {
+  DocumentKind,
+  DocumentRecord,
+  DocumentSourceType,
+  DocumentStatus,
+  ValidationIssue,
+} from '../models/document.models';
 
 interface DocumentApiRow {
   id: string;
@@ -62,6 +68,13 @@ export interface PageMeta {
   totalPages: number;
 }
 
+export type DocumentLineItemPatch = {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+};
+
 function mapStatus(s: string): DocumentStatus {
   const m: Record<string, DocumentStatus> = {
     UPLOADED: 'uploaded',
@@ -79,6 +92,13 @@ function mapKind(dt: string | null): DocumentKind {
   return 'invoice';
 }
 
+function mapSourceType(s: string): DocumentSourceType {
+  if (s === 'IMAGE' || s === 'CSV' || s === 'TXT' || s === 'PDF') {
+    return s;
+  }
+  return 'TXT';
+}
+
 function mapRow(api: DocumentApiRow): DocumentRecord {
   const issues: ValidationIssue[] = api.validationIssues.map((v) => ({
     field: v.fieldPath,
@@ -89,6 +109,8 @@ function mapRow(api: DocumentApiRow): DocumentRecord {
   return {
     id: api.id,
     fileName: api.fileName,
+    sourceType: mapSourceType(api.sourceType),
+    originalMimeType: api.originalMimeType,
     documentKind: mapKind(api.documentType),
     supplierName: api.supplierName ?? '',
     documentNumber: api.documentNumber ?? '',
@@ -172,6 +194,26 @@ export class DocumentService {
     );
   }
 
+  /** Authenticated binary GET; use for preview (blob URL) or client-side download. */
+  getFileBlob(id: string): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}/documents/${id}/file`, { responseType: 'blob' });
+  }
+
+  /** Triggers a browser download of the stored file using the given file name. */
+  downloadFileBlob(id: string, fileName: string): void {
+    this.getFileBlob(id).subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName || 'document';
+        a.rel = 'noopener';
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+    });
+  }
+
   list(filter?: DocumentStatus): DocumentRecord[] {
     const rows = this._store();
     if (!filter) {
@@ -211,6 +253,7 @@ export class DocumentService {
       subtotal: number;
       tax: number;
       total: number;
+      lineItems: DocumentLineItemPatch[];
     },
   ): Observable<void> {
     return this.http
@@ -236,6 +279,7 @@ export class DocumentService {
       subtotal: number;
       tax: number;
       total: number;
+      lineItems: DocumentLineItemPatch[];
     },
   ): Observable<void> {
     return this.http

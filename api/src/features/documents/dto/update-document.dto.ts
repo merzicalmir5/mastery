@@ -1,11 +1,37 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsNumber,
   IsOptional,
   IsString,
   Min,
+  MinLength,
+  ValidateNested,
 } from 'class-validator';
+
+/** One line on PATCH; sent as full replacement list when editing line items. */
+export class UpdateDocumentLineItemDto {
+  @IsString()
+  @MinLength(1)
+  description!: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  quantity!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  lineTotal!: number;
+}
 
 export class UpdateDocumentDto {
   @IsOptional()
@@ -49,6 +75,14 @@ export class UpdateDocumentDto {
   @IsNumber()
   @Min(0)
   total?: number;
+
+  /** When set (save or confirm), replaces all line items for the document. Omit to leave lines unchanged. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => UpdateDocumentLineItemDto)
+  lineItems?: UpdateDocumentLineItemDto[];
 
   /** Save edits only | confirm as validated | reject */
   @IsOptional()

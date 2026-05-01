@@ -1,16 +1,17 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
-import { MatTableModule } from '@angular/material/table';
 import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
-import { DocumentService } from '../services/document.service';
+import type { LineItem } from '../models/document.models';
+import { DocumentFilePreviewComponent } from '../document-file-preview/document-file-preview.component';
+import { DocumentService, type DocumentLineItemPatch } from '../services/document.service';
 
 @Component({
   selector: 'app-document-detail',
@@ -23,15 +24,12 @@ import { DocumentService } from '../services/document.service';
     MatInputModule,
     MatSelectModule,
     MatButtonModule,
-    MatTableModule,
+    DocumentFilePreviewComponent,
   ],
   templateUrl: './document-detail.component.html',
   styleUrl: './document-detail.component.scss',
 })
 export class DocumentDetailComponent {
-  readonly linesPage = signal(1);
-  readonly linesPageSize = signal(5);
-
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
@@ -48,17 +46,6 @@ export class DocumentDetailComponent {
     return id ? this.documents.getById(id) : undefined;
   });
 
-  readonly lineColumns = ['description', 'quantity', 'unitPrice', 'lineTotal'];
-  readonly pagedLineItems = computed(() => {
-    const lines = this.doc()?.lineItems ?? [];
-    const start = (this.linesPage() - 1) * this.linesPageSize();
-    return lines.slice(start, start + this.linesPageSize());
-  });
-  readonly lineTotalPages = computed(() => {
-    const total = this.doc()?.lineItems.length ?? 0;
-    return Math.max(1, Math.ceil(total / this.linesPageSize()));
-  });
-
   readonly form = this.fb.nonNullable.group({
     documentType: ['INVOICE' as 'INVOICE' | 'PURCHASE_ORDER'],
     supplierName: [''],
@@ -69,18 +56,17 @@ export class DocumentDetailComponent {
     subtotal: [0],
     tax: [0],
     total: [0],
+    lineItems: this.fb.array<FormGroup>([]),
   });
 
   constructor() {
-    effect(() => {
+    effect((onCleanup) => {
       const id = this.docId();
       if (!id) {
         return;
       }
-      if (this.documents.getById(id)) {
-        return;
-      }
-      this.documents.loadOne(id).subscribe();
+      const sub = this.documents.loadOne(id).subscribe();
+      onCleanup(() => sub.unsubscribe());
     });
     effect(() => {
       const d = this.doc();
@@ -98,6 +84,24 @@ export class DocumentDetailComponent {
         tax: d.tax,
         total: d.total,
       });
+      const fa = this.lineItemsArray;
+      fa.clear();
+      for (const li of d.lineItems) {
+        fa.push(this.lineGroup(li));
+      }
+    });
+  }
+
+  get lineItemsArray(): FormArray<FormGroup> {
+    return this.form.controls.lineItems as FormArray<FormGroup>;
+  }
+
+  private lineGroup(li?: LineItem): FormGroup {
+    return this.fb.nonNullable.group({
+      description: [li?.description ?? ''],
+      quantity: [li?.quantity ?? 1],
+      unitPrice: [li?.unitPrice ?? 0],
+      lineTotal: [li?.lineTotal ?? 0],
     });
   }
 
@@ -111,6 +115,42 @@ export class DocumentDetailComponent {
 
   hasIssue(field: string): boolean {
     return this.issuesForField(field).length > 0;
+  }
+
+  issuesForLineIndex(index: number): string[] {
+    const d = this.doc();
+    if (!d) {
+      return [];
+    }
+    const prefix = `lineItems[${index}]`;
+    return d.validationIssues
+      .filter((i) => i.field.startsWith(prefix))
+      .map((i) => i.message);
+  }
+
+  hasLineIssue(index: number): boolean {
+    return this.issuesForLineIndex(index).length > 0;
+  }
+
+  addLine(): void {
+    this.lineItemsArray.push(this.lineGroup());
+  }
+
+  removeLine(index: number): void {
+    this.lineItemsArray.removeAt(index);
+  }
+
+  /** Rows with a non-empty description are sent to the API. */
+  collectLineItems(): DocumentLineItemPatch[] {
+    return this.lineItemsArray.controls
+      .map((ctrl) => ctrl.getRawValue() as Record<string, unknown>)
+      .map((v) => ({
+        description: String(v['description'] ?? '').trim(),
+        quantity: Number(v['quantity']),
+        unitPrice: Number(v['unitPrice']),
+        lineTotal: Number(v['lineTotal']),
+      }))
+      .filter((li) => li.description.length > 0);
   }
 
   back(): void {
@@ -134,6 +174,7 @@ export class DocumentDetailComponent {
         subtotal: Number(v.subtotal),
         tax: Number(v.tax),
         total: Number(v.total),
+        lineItems: this.collectLineItems(),
       })
       .subscribe({
         next: () => void this.router.navigate(['/dashboard/documents']),
@@ -157,6 +198,7 @@ export class DocumentDetailComponent {
         subtotal: Number(v.subtotal),
         tax: Number(v.tax),
         total: Number(v.total),
+        lineItems: this.collectLineItems(),
       })
       .subscribe({
         next: () => void this.router.navigate(['/dashboard/documents']),
@@ -181,28 +223,5 @@ export class DocumentDetailComponent {
     this.documents.deleteDocument(id).subscribe({
       next: () => void this.router.navigate(['/dashboard/documents']),
     });
-  }
-
-  onLinesPageSizeChange(value: string): void {
-    const next = Number(value);
-    if (!Number.isFinite(next) || next <= 0) {
-      return;
-    }
-    this.linesPageSize.set(next);
-    this.linesPage.set(1);
-  }
-
-  prevLinesPage(): void {
-    if (this.linesPage() <= 1) {
-      return;
-    }
-    this.linesPage.update((v) => v - 1);
-  }
-
-  nextLinesPage(): void {
-    if (this.linesPage() >= this.lineTotalPages()) {
-      return;
-    }
-    this.linesPage.update((v) => v + 1);
   }
 }

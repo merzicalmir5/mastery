@@ -4,29 +4,56 @@
     Drag and drop a file here or browse. {{ acceptedHint }}
   </p>
 
-  <div
-    class="upload__drop"
-    (dragover)="onDragOver($event)"
-    (drop)="onDrop($event)"
-    role="button"
-    tabindex="0"
-    (keydown.enter)="fileInput.click()"
-    (keydown.space)="fileInput.click()"
-  >
-    <mat-icon class="upload__drop-icon" aria-hidden="true">cloud_upload</mat-icon>
-    <p class="upload__drop-text">Drop file to upload</p>
-    <button mat-stroked-button type="button" (click)="fileInput.click()">Browse files</button>
-    <input
-      #fileInput
-      class="upload__input"
-      type="file"
-      [accept]="'.pdf,.csv,.txt,.png,.jpg,.jpeg,.webp'"
-      (change)="onFileSelected($event)"
-    />
+  <div class="upload__drop-wrap">
+    <div
+      class="upload__drop"
+      [class.upload__drop--disabled]="uploading()"
+      (dragover)="onDragOver($event)"
+      (drop)="onDrop($event)"
+      role="button"
+      [attr.tabindex]="uploading() ? -1 : 0"
+      (keydown.enter)="onZoneKeyActivate($event, fileInput)"
+      (keydown.space)="onZoneKeyActivate($event, fileInput)"
+    >
+      <mat-icon class="upload__drop-icon" aria-hidden="true">cloud_upload</mat-icon>
+      <p class="upload__drop-text">Drop file to upload</p>
+      <button
+        mat-stroked-button
+        type="button"
+        (click)="fileInput.click()"
+        [disabled]="uploading()"
+      >
+        Browse files
+      </button>
+      <input
+        #fileInput
+        class="upload__input"
+        type="file"
+        [accept]="'.pdf,.csv,.txt,.png,.jpg,.jpeg,.webp'"
+        [disabled]="uploading()"
+        (change)="onFileSelected($event)"
+      />
+    </div>
+
+    @if (uploading()) {
+      <div class="upload__overlay" aria-live="polite" aria-busy="true">
+        <mat-progress-spinner mode="indeterminate" diameter="44" />
+        <p class="upload__overlay-text">Uploading and processing on the server…</p>
+      </div>
+    }
   </div>
 
   @if (lastMessage(); as msg) {
     <div class="upload__feedback">{{ msg }}</div>
+  }
+
+  @if (lastUploadedId(); as uid) {
+    <div class="upload__preview-block">
+      <app-document-file-preview [documentId]="uid" [fileName]="lastUploadedFileName()" [compact]="true" />
+      <div class="upload__preview-actions">
+        <a mat-flat-button color="primary" [routerLink]="['/dashboard/documents', uid]">Open document</a>
+      </div>
+    </div>
   }
 
   <div class="upload__footer">

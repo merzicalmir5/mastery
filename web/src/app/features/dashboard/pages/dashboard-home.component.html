@@ -8,11 +8,34 @@
     @for (s of stats(); track s.label) {
       <mat-card class="dash-home__card" appearance="outlined">
         <div class="dash-home__card-label">{{ s.label }}</div>
-        <div class="dash-home__card-value">{{ s.value }}</div>
+        <div class="dash-home__card-value" [ngClass]="'dash-home__card-value--' + s.tone">{{ s.value }}</div>
         <div class="dash-home__card-hint">{{ s.hint }}</div>
       </mat-card>
     }
   </div>
+
+  @if (totalsByCurrency().length) {
+    <mat-card class="dash-home__panel dash-home__panel--currency" appearance="outlined">
+      <div class="dash-home__panel-title">Totals by currency</div>
+      <p class="dash-home__panel-body dash-home__panel-note">
+        Adds each document’s stored <code>total</code> (money from extraction or review)—not the number of uploads.
+        Uses the same documents as the table below (up to 100 most recently updated for your company). Rows with
+        no currency are skipped.
+      </p>
+      <table mat-table [dataSource]="totalsByCurrency()" class="dash-home__currency-table">
+        <ng-container matColumnDef="currency">
+          <th mat-header-cell *matHeaderCellDef>Currency</th>
+          <td mat-cell *matCellDef="let row">{{ row.currency }}</td>
+        </ng-container>
+        <ng-container matColumnDef="total">
+          <th mat-header-cell *matHeaderCellDef>Sum of amounts</th>
+          <td mat-cell *matCellDef="let row">{{ row.total | number: '1.2-2' }}</td>
+        </ng-container>
+        <tr mat-header-row *matHeaderRowDef="currencyColumns"></tr>
+        <tr mat-row *matRowDef="let row; columns: currencyColumns"></tr>
+      </table>
+    </mat-card>
+  }
 
   <mat-card class="dash-home__panel" appearance="outlined">
     <div class="dash-home__panel-title">Recent activity</div>
@@ -35,7 +58,11 @@
 
         <ng-container matColumnDef="status">
           <th mat-header-cell *matHeaderCellDef>Status</th>
-          <td mat-cell *matCellDef="let row">{{ statusLabel(row.status) }}</td>
+          <td mat-cell *matCellDef="let row">
+            <span class="dash-home__status dash-home__status--{{ row.status }}">{{
+              statusLabel(row.status)
+            }}</span>
+          </td>
         </ng-container>
 
         <ng-container matColumnDef="issues">
@@ -46,6 +73,21 @@
         <ng-container matColumnDef="updatedAt">
           <th mat-header-cell *matHeaderCellDef>Updated</th>
           <td mat-cell *matCellDef="let row">{{ row.updatedAt | slice: 0 : 10 }}</td>
+        </ng-container>
+
+        <ng-container matColumnDef="actions">
+          <th mat-header-cell *matHeaderCellDef>Actions</th>
+          <td mat-cell *matCellDef="let row">
+            <button
+              mat-stroked-button
+              color="warn"
+              type="button"
+              class="dash-home__delete"
+              (click)="delete(row)"
+            >
+              Delete
+            </button>
+          </td>
         </ng-container>
 
         <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>

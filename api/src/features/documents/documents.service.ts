@@ -14,6 +14,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { createReadStream, type ReadStream } from 'node:fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { JwtUser } from '../../core/auth/current-user.decorator';
@@ -204,10 +205,60 @@ export class DocumentsService {
     return this.toApiRow(row);
   }
 
+  /**
+   * Opens the stored upload for streaming (same company as JWT).
+   * Caller must pipe the stream to the HTTP response and handle errors.
+   */
+  async getFileStream(
+    id: string,
+    user: JwtUser,
+  ): Promise<{ stream: ReadStream; contentType: string; fileName: string }> {
+    const doc = await this.prisma.document.findFirst({
+      where: { id, companyName: user.companyName },
+      select: { fileName: true, storagePath: true, originalMimeType: true, sourceType: true },
+    });
+    if (!doc?.storagePath) {
+      throw new NotFoundException('No file stored for this document.');
+    }
+    const absolutePath = path.join(this.uploadRoot, doc.storagePath);
+    try {
+      await fs.access(absolutePath);
+    } catch {
+      throw new NotFoundException('Original file is no longer on disk.');
+    }
+    const stream = createReadStream(absolutePath);
+    const contentType =
+      (doc.originalMimeType && doc.originalMimeType.trim()) ||
+      this.guessContentTypeFromName(doc.fileName);
+    return { stream, contentType, fileName: doc.fileName };
+  }
+
+  /** Value safe inside `Content-Disposition: ... filename="..."` (ASCII, no quotes or newlines). */
+  dispositionFilename(name: string): string {
+    const s = name.replace(/[\r\n"]/g, '_').trim() || 'document';
+    return s.length > 200 ? s.slice(0, 200) : s;
+  }
+
+  private guessContentTypeFromName(fileName: string): string {
+    const ext = path.extname(fileName).toLowerCase();
+    const map: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.bmp': 'image/bmp',
+      '.csv': 'text/csv; charset=utf-8',
+      '.txt': 'text/plain; charset=utf-8',
+    };
+    return map[ext] ?? 'application/octet-stream';
+  }
+
   async update(id: string, dto: UpdateDocumentDto, user: JwtUser): Promise<DocumentApiRow> {
     const existing = await this.prisma.document.findFirst({
       where: { id, companyName: user.companyName },
-      include: { lineItems: true },
+      include: { lineItems: { orderBy: { itemOrder: 'asc' } } },
     });
     if (!existing) {
       throw new NotFoundException('Document not found.');
@@ -246,20 +297,36 @@ export class DocumentsService {
     const action = dto.action ?? 'save';
 
     if (action === 'confirm') {
-      const snapshot = this.snapshotForFinal(existing, dto);
       data.status = DocumentStatus.VALIDATED;
       data.reviewedAt = new Date();
       data.reviewedBy = { connect: { id: user.sub } };
-      data.finalData = snapshot as object;
+      data.finalData = this.buildFinalSnapshot(existing, dto) as object;
     } else if (action === 'reject') {
       data.status = DocumentStatus.REJECTED;
       data.reviewedAt = new Date();
       data.reviewedBy = { connect: { id: user.sub } };
     }
 
-    await this.prisma.document.update({
-      where: { id },
-      data,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.document.update({
+        where: { id },
+        data,
+      });
+      if (action !== 'reject' && dto.lineItems !== undefined) {
+        await tx.documentLineItem.deleteMany({ where: { documentId: id } });
+        if (dto.lineItems.length > 0) {
+          await tx.documentLineItem.createMany({
+            data: dto.lineItems.map((li, i) => ({
+              documentId: id,
+              itemOrder: i,
+              description: li.description.trim(),
+              quantity: new Prisma.Decimal(li.quantity),
+              unitPrice: new Prisma.Decimal(li.unitPrice),
+              lineTotal: new Prisma.Decimal(li.lineTotal),
+            })),
+          });
+        }
+      }
     });
 
     if (action === 'save' || action === 'confirm') {
@@ -286,7 +353,7 @@ export class DocumentsService {
     }
   }
 
-  private snapshotForFinal(
+  private buildFinalSnapshot(
     doc: Document & { lineItems: DocumentLineItem[] },
     dto: UpdateDocumentDto,
   ): Record<string, unknown> {
@@ -306,6 +373,20 @@ export class DocumentsService {
         : doc.dueDate
           ? doc.dueDate.toISOString().slice(0, 10)
           : null;
+    const lineItems =
+      dto.lineItems !== undefined
+        ? dto.lineItems.map((li) => ({
+            description: li.description.trim(),
+            quantity: li.quantity,
+            unitPrice: li.unitPrice,
+            lineTotal: li.lineTotal,
+          }))
+        : doc.lineItems.map((li) => ({
+            description: li.description,
+            quantity: Number(li.quantity),
+            unitPrice: Number(li.unitPrice),
+            lineTotal: Number(li.lineTotal),
+          }));
     return {
       documentType: dto.documentType ?? doc.documentType,
       supplierName: dto.supplierName ?? doc.supplierName,
@@ -316,12 +397,7 @@ export class DocumentsService {
       subtotal: sub,
       tax,
       total: tot,
-      lineItems: doc.lineItems.map((li) => ({
-        description: li.description,
-        quantity: Number(li.quantity),
-        unitPrice: Number(li.unitPrice),
-        lineTotal: Number(li.lineTotal),
-      })),
+      lineItems,
       confirmedAt: new Date().toISOString(),
     };
   }

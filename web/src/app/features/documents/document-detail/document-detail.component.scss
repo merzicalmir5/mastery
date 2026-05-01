@@ -79,9 +79,73 @@
     border-radius: 8px !important;
   }
 
+  &__stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
   &__card-title {
     font-weight: 700;
     margin-bottom: 0.75rem;
+  }
+
+  &__card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+
+    .doc-detail__card-title {
+      margin-bottom: 0;
+    }
+  }
+
+  &__lines-hint {
+    margin: 0 0 0.75rem;
+    font-size: 0.82rem;
+    color: var(--app-text-secondary);
+  }
+
+  &__lines-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    max-height: 28rem;
+    overflow: auto;
+    padding-right: 0.25rem;
+  }
+
+  &__line-row {
+    display: grid;
+    grid-template-columns: 1fr 5.5rem 5.5rem 6.5rem auto;
+    gap: 0.5rem 0.65rem;
+    align-items: start;
+  }
+
+  @media (max-width: 900px) {
+    &__line-row {
+      grid-template-columns: 1fr 1fr 1fr;
+
+      .doc-detail__line-remove {
+        grid-column: 1 / -1;
+      }
+    }
+  }
+
+  &__line-field {
+    width: 100%;
+
+    &--desc {
+      min-width: 0;
+    }
+  }
+
+  &__line-remove {
+    margin-top: 0.35rem;
+    white-space: nowrap;
   }
 
   &__form {
@@ -111,6 +175,10 @@
 
     &--error {
       color: var(--status-error);
+    }
+
+    &--line {
+      margin: -0.2rem 0 0.25rem;
     }
   }
 
