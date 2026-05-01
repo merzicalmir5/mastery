@@ -1,10 +1,12 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
+import { Component, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { RouterLink } from '@angular/router';
+import { finalize } from 'rxjs';
 import { DocumentFilePreviewComponent } from '../document-file-preview/document-file-preview.component';
 import { DocumentService } from '../services/document.service';
 
@@ -23,6 +25,8 @@ import { DocumentService } from '../services/document.service';
   styleUrl: './document-upload.component.scss',
 })
 export class DocumentUploadComponent {
+  private static readonly MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
+
   private readonly documents = inject(DocumentService);
 
   readonly acceptedHint =
@@ -30,7 +34,6 @@ export class DocumentUploadComponent {
 
   readonly lastMessage = signal<string | null>(null);
   readonly uploading = signal(false);
-  /** After a successful upload, drive preview + link to full review. */
   readonly lastUploadedId = signal<string | null>(null);
   readonly lastUploadedFileName = signal<string>('');
 
@@ -77,24 +80,32 @@ export class DocumentUploadComponent {
       this.lastMessage.set(`Unsupported file type: ${file.name}`);
       return;
     }
+    if (file.size > DocumentUploadComponent.MAX_FILE_SIZE_BYTES) {
+      this.lastMessage.set('File is too large. Maximum upload size is 15 MB.');
+      return;
+    }
     this.uploading.set(true);
     this.lastMessage.set(null);
     this.lastUploadedId.set(null);
-    this.documents.uploadFile(file).subscribe({
-      next: (created) => {
-        this.uploading.set(false);
-        this.lastUploadedId.set(created.id);
-        this.lastUploadedFileName.set(created.fileName);
-        this.lastMessage.set(`Uploaded: ${created.fileName} (${created.id}). Status: ${created.status}.`);
-      },
-      error: (err: unknown) => {
-        this.uploading.set(false);
-        const message =
-          err instanceof HttpErrorResponse && typeof err.error?.message === 'string'
-            ? err.error.message
-            : 'Upload failed. Check that you are logged in and the API is running.';
-        this.lastMessage.set(message);
-      },
-    });
+    this.documents
+      .uploadFile(file)
+      .pipe(
+        finalize(() => this.uploading.set(false)),
+        takeUntilDestroyed(),
+      )
+      .subscribe({
+        next: (created) => {
+          this.lastUploadedId.set(created.id);
+          this.lastUploadedFileName.set(created.fileName);
+          this.lastMessage.set(`Uploaded: ${created.fileName} (${created.id}). Status: ${created.status}.`);
+        },
+        error: (err: unknown) => {
+          const message =
+            err instanceof HttpErrorResponse && typeof err.error?.message === 'string'
+              ? err.error.message
+              : 'Upload failed. Check that you are logged in and the API is running.';
+          this.lastMessage.set(message);
+        },
+      });
   }
 }
