@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mastery-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mastery
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mastery"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: mastery-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/mastery?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-replace-with-strong-access-secret}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-replace-with-strong-refresh-secret}
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      APP_BASE_URL: http://localhost:3000
+      FRONTEND_BASE_URL: http://localhost:4200
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-no-reply@mastery.local}
+    ports:
+      - "3000:3000"
+    volumes:
+      - api_uploads:/app/uploads
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        API_URL: http://localhost:3000
+    container_name: mastery-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "4200:80"
+
+volumes:
+  postgres_data:
+  api_uploads:
