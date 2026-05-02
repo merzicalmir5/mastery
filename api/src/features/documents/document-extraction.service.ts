@@ -24,6 +24,7 @@ export type ExtractedLineItem = {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  unitLabel?: string;
 };
 
 export type ExtractionResult = {
@@ -121,8 +122,9 @@ export class DocumentExtractionService {
   }
 
   /**
-   * Image OCR via external Python OCRservice (EasyOCR). Tesseract.js path is disabled temporarily.
-   * Set OCR_SERVICE_URL (e.g. http://127.0.0.1:8000). Optional OCR_SERVICE_TIMEOUT_MS (default 120000).
+   * Image OCR via external document OCR API (Python FastAPI + EasyOCR). Tesseract.js path is disabled temporarily.
+   * Set OCR_SERVICE_URL to that service’s base URL (local: http://127.0.0.1:8000; Docker Compose: http://ocr-api:8000).
+   * Optional OCR_SERVICE_TIMEOUT_MS (default 120000).
    */
   private async parseImage(buffer: Buffer): Promise<Partial<ExtractionResult>> {
     const baseUrl = this.config.get<string>('OCR_SERVICE_URL')?.trim();
@@ -136,7 +138,7 @@ export class DocumentExtractionService {
           ocrError: 'OCR_SERVICE_URL not set',
         },
         ingestionNotes:
-          'Set OCR_SERVICE_URL to your Python OCRservice base URL (e.g. http://127.0.0.1:8000), start OCRservice, then re-upload.',
+          'Set OCR_SERVICE_URL to the document OCR API base URL (e.g. http://127.0.0.1:8000 locally, or http://ocr-api:8000 in Docker), start ocr-api, then re-upload.',
       };
     }
 
@@ -154,6 +156,18 @@ export class DocumentExtractionService {
       });
 
       const bodyText = await res.text();
+
+      const previewLen = 8000;
+      console.log('[documents.parseImage] document OCR API response', {
+        httpStatus: res.status,
+        ok: res.ok,
+        bodyLength: bodyText.length,
+        body:
+          bodyText.length > previewLen
+            ? `${bodyText.slice(0, previewLen)}… (truncated, ${bodyText.length} chars total)`
+            : bodyText,
+      });
+
       if (!res.ok) {
         return {
           ...this.parseTextContent(''),
@@ -163,7 +177,7 @@ export class DocumentExtractionService {
             ocrHttpStatus: res.status,
             ocrBodyPreview: bodyText.slice(0, 500),
           },
-          ingestionNotes: `OCR service error (${res.status}). Is OCRservice running at ${baseUrl}?`,
+          ingestionNotes: `Document OCR API error (${res.status}). Is it reachable at ${baseUrl}?`,
         };
       }
 
@@ -172,6 +186,13 @@ export class DocumentExtractionService {
         confidence?: number | null;
         lines?: Array<{ text: string; confidence: number }>;
         engine?: string;
+        structuredLineItems?: Array<{
+          description?: string;
+          quantity?: number;
+          unit?: string;
+          unitPrice?: number;
+          lineTotal?: number;
+        }>;
       };
       try {
         payload = JSON.parse(bodyText) as typeof payload;
@@ -181,10 +202,10 @@ export class DocumentExtractionService {
           rawExtractedData: {
             source: 'image',
             ocrServiceBase: baseUrl,
-            ocrError: 'invalid JSON from OCR service',
+            ocrError: 'invalid JSON from document OCR API',
             ocrBodyPreview: bodyText.slice(0, 300),
           },
-          ingestionNotes: 'OCR service returned invalid JSON.',
+          ingestionNotes: 'Document OCR API returned invalid JSON.',
         };
       }
 
@@ -192,13 +213,44 @@ export class DocumentExtractionService {
       const confidence = payload.confidence ?? null;
       const parsed = this.parseTextContent(text);
 
-      const parsedLineItemRows = parsed.lineItems?.length ?? 0;
-      console.log('[documents.parseImage] parsed table / line-item rows from OCR text', {
-        lineItemRows: parsedLineItemRows,
-      });
+      const structured = Array.isArray(payload.structuredLineItems)
+        ? payload.structuredLineItems
+        : [];
+      const fromStructured: ExtractedLineItem[] = structured
+        .filter(
+          (r) =>
+            typeof r.description === 'string' &&
+            r.description.trim().length > 0 &&
+            r.lineTotal != null &&
+            Number.isFinite(Number(r.lineTotal)),
+        )
+        .map((r) => {
+          const qtyRaw = Number(r.quantity);
+          const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 ? Math.floor(qtyRaw) : 1;
+          const lt = Number(r.lineTotal);
+          let unitPrice =
+            r.unitPrice != null && Number.isFinite(Number(r.unitPrice))
+              ? Number(r.unitPrice)
+              : lt / qty;
+          if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+            unitPrice = qty > 0 ? lt / qty : 0;
+          }
+          const ul = typeof r.unit === 'string' && r.unit.trim() ? r.unit.trim() : 'each';
+          return {
+            description: r.description!.trim(),
+            quantity: qty,
+            unitPrice,
+            lineTotal: lt,
+            unitLabel: ul,
+          };
+        });
+
+      const lineItems =
+        fromStructured.length > 0 ? fromStructured : (parsed.lineItems ?? []);
 
       return {
         ...parsed,
+        lineItems,
         rawExtractedData: {
           ...(parsed.rawExtractedData ?? {}),
           source: 'image',
@@ -206,9 +258,10 @@ export class DocumentExtractionService {
           confidence,
           ocrServiceBase: baseUrl,
           ocrLinesPreview: payload.lines?.slice(0, 40),
+          structuredLineItemsPreview: structured.slice(0, 20),
         },
         ingestionNotes: text.trim()
-          ? 'OCR (EasyOCR service) extracted text. Please review recognized values.'
+          ? 'Document OCR API (EasyOCR) extracted text. Please review recognized values.'
           : 'OCR did not detect enough text. Please review and enter data manually.',
       };
     } catch (err) {
@@ -221,7 +274,7 @@ export class DocumentExtractionService {
           ocrServiceBase: baseUrl,
           ocrError: msg,
         },
-        ingestionNotes: `OCR service unreachable or timed out (${timeoutMs}ms): ${msg}`,
+        ingestionNotes: `Document OCR API unreachable or timed out (${timeoutMs}ms): ${msg}`,
       };
     }
   }
