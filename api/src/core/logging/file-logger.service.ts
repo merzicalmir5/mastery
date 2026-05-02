@@ -4,13 +4,17 @@ import { join } from 'node:path';
 
 @Injectable()
 export class FileLogger extends ConsoleLogger {
-  private readonly logFilePath: string;
+  private readonly logFilePath: string | null;
 
   constructor(context = 'App', options: { logLevels?: LogLevel[] } = {}) {
     super(context, options);
-    const dir = join(process.cwd(), 'logs');
-    mkdirSync(dir, { recursive: true });
-    this.logFilePath = join(dir, 'app.log');
+    try {
+      const dir = join(process.cwd(), 'logs');
+      mkdirSync(dir, { recursive: true });
+      this.logFilePath = join(dir, 'app.log');
+    } catch {
+      this.logFilePath = null;
+    }
   }
 
   override log(message: unknown, context?: string): void {
@@ -40,10 +44,17 @@ export class FileLogger extends ConsoleLogger {
   }
 
   private writeLine(level: string, message: unknown, context?: string): void {
+    if (!this.logFilePath) {
+      return;
+    }
     const ts = new Date().toISOString();
     const ctx = context || this.context || 'App';
     const line = `${ts} [${level}] [${ctx}] ${this.stringify(message)}\n`;
-    appendFileSync(this.logFilePath, line, { encoding: 'utf8' });
+    try {
+      appendFileSync(this.logFilePath, line, { encoding: 'utf8' });
+    } catch {
+      /* ignore disk errors so logging never prevents HTTP bind */
+    }
   }
 
   private stringify(value: unknown): string {

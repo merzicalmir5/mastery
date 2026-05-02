@@ -43,7 +43,15 @@ async function bootstrap() {
   const prismaService = app.get(PrismaService);
   await prismaService.enableShutdownHooks(app);
 
-  const port = process.env.PORT ?? 3000;
-  await app.listen(port, '0.0.0.0');
+  const parsed = Number.parseInt(process.env.PORT ?? '3000', 10);
+  const listenPort = Number.isFinite(parsed) && parsed > 0 ? parsed : 3000;
+  await app.listen(listenPort, '0.0.0.0');
+  console.log(
+    `[bootstrap] listening on 0.0.0.0:${listenPort} (process.env.PORT=${JSON.stringify(process.env.PORT)})`,
+  );
 }
-bootstrap();
+
+bootstrap().catch((err: unknown) => {
+  console.error('[bootstrap] fatal', err);
+  process.exit(1);
+});
