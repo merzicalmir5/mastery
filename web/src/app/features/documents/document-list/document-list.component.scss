@@ -1,10 +1,4 @@
 .doc-list {
-  &__title {
-    margin: 0 0 0.35rem;
-    font-size: 1.35rem;
-    font-weight: 700;
-  }
-
   &__subtitle {
     margin: 0 0 1rem;
     color: var(--app-text-primary);
@@ -33,7 +27,7 @@
   }
 
   &__row:hover {
-    background: rgba(31, 111, 235, 0.04);
+    background: rgb(var(--app-brand-rgb) / 0.04);
   }
 
   &__kind {
@@ -44,11 +38,11 @@
     border: 1px solid rgba(17, 24, 39, 0.15);
 
     &--invoice {
-      background: rgba(31, 111, 235, 0.08);
+      background: rgb(var(--app-brand-rgb) / 0.08);
     }
 
     &--purchase_order {
-      background: rgba(124, 92, 255, 0.1);
+      background: rgb(var(--app-brand-rgb) / 0.1);
     }
   }
 
@@ -98,13 +92,6 @@
     gap: 0.5rem;
   }
 
-  &__open,
-  &__delete {
-    border-radius: 8px !important;
-    font-size: 0.82rem;
-    line-height: 1.2;
-  }
-
   &__pagination {
     margin-top: 0.75rem;
     display: flex;
@@ -118,11 +105,31 @@
     background: var(--app-card-surface);
   }
 
-  &__pagination-left,
   &__pagination-right {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
+    margin-left: auto;
+    justify-content: flex-end;
+  }
+
+  &__pagination-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  &__pagination-icon-btn {
+    min-width: 2.75rem !important;
+    padding: 0 0.45rem !important;
+
+    mat-icon {
+      margin: 0 !important;
+      font-size: 1.35rem;
+      width: 1.35rem;
+      height: 1.35rem;
+    }
   }
 
   &__pagination-center {

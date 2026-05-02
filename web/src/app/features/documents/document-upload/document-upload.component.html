@@ -1,62 +1,126 @@
 <section class="upload">
-  <h1 class="upload__title">Upload documents</h1>
   <p class="upload__subtitle">
-    Drag and drop a file here or browse. {{ acceptedHint }}
+    Upload a file from disk or capture with your camera. {{ acceptedHint }}
   </p>
 
-  <div class="upload__drop-wrap">
+  <div class="upload__panels">
+    <div class="upload__row">
+      <div class="upload__col">
+      <div class="upload__drop-wrap">
+        <div
+          class="upload__drop"
+          [class.upload__drop--disabled]="uploading()"
+          (dragover)="onDragOver($event)"
+          (drop)="onDrop($event)"
+          role="button"
+          [attr.tabindex]="uploading() ? -1 : 0"
+          (keydown.enter)="onZoneKeyActivate($event, fileInput)"
+          (keydown.space)="onZoneKeyActivate($event, fileInput)"
+        >
+          <mat-icon class="upload__drop-icon" aria-hidden="true">cloud_upload</mat-icon>
+          <p class="upload__drop-text">Drop file here or browse</p>
+          <button
+            mat-stroked-button
+            type="button"
+            (click)="fileInput.click()"
+            [disabled]="uploading()"
+          >
+            Browse files
+          </button>
+          <input
+            #fileInput
+            class="upload__input"
+            type="file"
+            [accept]="'.pdf,.csv,.txt,.png,.jpg,.jpeg,.webp'"
+            [disabled]="uploading()"
+            (change)="onFileSelected($event)"
+          />
+        </div>
+
+        @if (uploading()) {
+          <div class="upload__overlay" aria-live="polite" aria-busy="true">
+            @if (uploadPercent() !== null) {
+              <mat-progress-bar class="upload__progress" mode="determinate" [value]="uploadPercent()!" />
+            } @else {
+              <mat-progress-spinner mode="indeterminate" diameter="44" />
+            }
+            <p class="upload__overlay-text">{{ uploadOverlayLabel() }}</p>
+            <p class="upload__overlay-hint">Speed depends on file size and your connection to the API.</p>
+          </div>
+        }
+        </div>
+      </div>
+
+      <div class="upload__col upload__col--scan">
+      <div class="upload__scan-panel" [class.upload__scan-panel--disabled]="uploading()">
+        <mat-icon class="upload__scan-icon" aria-hidden="true">photo_camera</mat-icon>
+        <p class="upload__scan-text">Or scan with your camera</p>
+        <button
+          mat-stroked-button
+          type="button"
+          class="upload__camera-btn"
+          (click)="openScanCamera()"
+          [disabled]="uploading()"
+          aria-label="Scan document with camera"
+        >
+          <mat-icon aria-hidden="true">photo_camera</mat-icon>
+          Scan document
+        </button>
+        <input
+          #cameraInput
+          class="upload__input"
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          capture="environment"
+          [disabled]="uploading()"
+          (change)="onFileSelected($event)"
+        />
+      </div>
+      </div>
+    </div>
+  </div>
+
+  @if (webcamOpen()) {
     <div
-      class="upload__drop"
-      [class.upload__drop--disabled]="uploading()"
-      (dragover)="onDragOver($event)"
-      (drop)="onDrop($event)"
-      role="button"
-      [attr.tabindex]="uploading() ? -1 : 0"
-      (keydown.enter)="onZoneKeyActivate($event, fileInput)"
-      (keydown.space)="onZoneKeyActivate($event, fileInput)"
+      class="upload__webcam-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Document camera"
+      (click)="closeWebcam()"
     >
-      <mat-icon class="upload__drop-icon" aria-hidden="true">cloud_upload</mat-icon>
-      <p class="upload__drop-text">Drop file to upload</p>
-      <button
-        mat-stroked-button
-        type="button"
-        (click)="fileInput.click()"
-        [disabled]="uploading()"
-      >
-        Browse files
-      </button>
-      <input
-        #fileInput
-        class="upload__input"
-        type="file"
-        [accept]="'.pdf,.csv,.txt,.png,.jpg,.jpeg,.webp'"
-        [disabled]="uploading()"
-        (change)="onFileSelected($event)"
-      />
-    </div>
-
-    @if (uploading()) {
-      <div class="upload__overlay" aria-live="polite" aria-busy="true">
-        <mat-progress-spinner mode="indeterminate" diameter="44" />
-        <p class="upload__overlay-text">Uploading and processing on the server…</p>
-      </div>
-    }
-  </div>
-
-  @if (lastMessage(); as msg) {
-    <div class="upload__feedback">{{ msg }}</div>
-  }
-
-  @if (lastUploadedId(); as uid) {
-    <div class="upload__preview-block">
-      <app-document-file-preview [documentId]="uid" [fileName]="lastUploadedFileName()" [compact]="true" />
-      <div class="upload__preview-actions">
-        <a mat-flat-button color="primary" [routerLink]="['/dashboard/documents', uid]">Open document</a>
+      <div class="upload__webcam-panel" (click)="$event.stopPropagation()">
+        <p class="upload__webcam-title">Position the document in frame</p>
+        <video
+          #webcamVideo
+          class="upload__webcam-video"
+          playsinline
+          muted
+          autoplay
+        ></video>
+        <div class="upload__webcam-actions">
+          <button mat-flat-button color="primary" type="button" (click)="captureFromWebcam()">
+            Capture
+          </button>
+          <button mat-button type="button" (click)="closeWebcam()">Cancel</button>
+        </div>
       </div>
     </div>
   }
 
-  <div class="upload__footer">
-    <a mat-button routerLink="/dashboard/documents">Go to all documents</a>
-  </div>
+  @if (lastMessage() || lastUploadedId()) {
+    <div class="upload__below-panels">
+      @if (lastMessage(); as msg) {
+        <div class="upload__feedback">{{ msg }}</div>
+      }
+
+      @if (lastUploadedId(); as uid) {
+        <div class="upload__preview-block">
+          <app-document-file-preview [documentId]="uid" [fileName]="lastUploadedFileName()" [compact]="true" />
+          <div class="upload__preview-actions">
+            <a mat-flat-button color="primary" [routerLink]="['/dashboard/documents', uid]">Open document</a>
+          </div>
+        </div>
+      }
+    </div>
+  }
 </section>

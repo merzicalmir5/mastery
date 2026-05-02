@@ -7,8 +7,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatListModule } from '@angular/material/list';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatToolbarModule } from '@angular/material/toolbar';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { distinctUntilChanged, map } from 'rxjs/operators';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { distinctUntilChanged, filter, map } from 'rxjs/operators';
 import { AuthService } from '../../core/auth/auth.service';
 import { ThemeService } from '../../core/theme/theme.service';
 
@@ -40,7 +40,7 @@ function initialSidenavOpened(): boolean {
 })
 export class DashboardComponent {
   private readonly router = inject(Router);
-  private readonly auth = inject(AuthService);
+  protected readonly auth = inject(AuthService);
   private readonly breakpoint = inject(BreakpointObserver);
   protected readonly theme = inject(ThemeService);
 
@@ -52,7 +52,17 @@ export class DashboardComponent {
 
   protected readonly sidenavOpen = signal(initialSidenavOpened());
 
+  protected readonly pageTitle = signal('Home');
+
   constructor() {
+    this.router.events
+      .pipe(
+        filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+        takeUntilDestroyed(),
+      )
+      .subscribe(() => this.refreshPageTitle());
+    this.refreshPageTitle();
+
     this.breakpoint
       .observe(MOBILE_QUERY)
       .pipe(
@@ -86,6 +96,17 @@ export class DashboardComponent {
   closeSidenavAfterNav(): void {
     if (this.isMobile()) {
       this.sidenavOpen.set(false);
+    }
+  }
+
+  private refreshPageTitle(): void {
+    let snapshot = this.router.routerState.snapshot.root;
+    while (snapshot.firstChild) {
+      snapshot = snapshot.firstChild;
+    }
+    const title = snapshot.data?.['pageTitle'];
+    if (typeof title === 'string' && title.length > 0) {
+      this.pageTitle.set(title);
     }
   }
 

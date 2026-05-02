@@ -8,6 +8,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
+import { ThemeService } from '../../core/theme/theme.service';
 
 @Component({
   selector: 'app-login',
@@ -30,6 +31,7 @@ export class LoginComponent implements OnDestroy {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthService);
+  protected readonly theme = inject(ThemeService);
 
   readonly loginForm = this.fb.nonNullable.group({
     email: ['', [Validators.required, Validators.email]],
@@ -44,13 +46,21 @@ export class LoginComponent implements OnDestroy {
   private infoMessageTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    const shouldShowVerificationInfo = this.route.snapshot.queryParamMap.get('verifyEmail') === '1';
-    if (shouldShowVerificationInfo) {
-      this.infoMessage.set('Registration successful. Check your email and verify your account before login.');
+    const q = this.route.snapshot.queryParamMap;
+    let msg: string | null = null;
+    if (q.get('activated') === '1') {
+      msg = 'Email verified. You can sign in now.';
+    } else if (q.get('verifyEmail') === '1') {
+      msg = 'Registration successful. Check your email and verify your account before login.';
+    } else if (q.get('passwordReset') === '1') {
+      msg = 'Your password was reset. Sign in with your new password.';
+    }
+    if (msg) {
+      this.infoMessage.set(msg);
       this.infoMessageTimeoutId = setTimeout(() => {
         this.infoMessage.set(null);
         this.infoMessageTimeoutId = null;
-      }, 5000);
+      }, 8000);
     }
   }
 

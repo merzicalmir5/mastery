@@ -4,11 +4,13 @@ import type { DocumentStatus } from '../documents/models/document.models';
 export const dashboardRoutes: Routes = [
   {
     path: '',
+    data: { pageTitle: 'Home' },
     loadComponent: () =>
       import('./pages/dashboard-home.component').then((m) => m.DashboardHomeComponent),
   },
   {
     path: 'upload',
+    data: { pageTitle: 'Upload documents' },
     loadComponent: () =>
       import('../documents/document-upload/document-upload.component').then(
         (m) => m.DocumentUploadComponent,
@@ -16,6 +18,7 @@ export const dashboardRoutes: Routes = [
   },
   {
     path: 'documents/:id',
+    data: { pageTitle: 'Document details' },
     loadComponent: () =>
       import('../documents/document-detail/document-detail.component').then(
         (m) => m.DocumentDetailComponent,
@@ -27,7 +30,7 @@ export const dashboardRoutes: Routes = [
       import('../documents/document-list/document-list.component').then(
         (m) => m.DocumentListComponent,
       ),
-    data: {},
+    data: { pageTitle: 'All documents' },
   },
   {
     path: 'review',
@@ -35,7 +38,10 @@ export const dashboardRoutes: Routes = [
       import('../documents/document-list/document-list.component').then(
         (m) => m.DocumentListComponent,
       ),
-    data: { statusFilter: 'needs_review' satisfies DocumentStatus },
+    data: {
+      statusFilter: 'needs_review' satisfies DocumentStatus,
+      pageTitle: 'Needs review',
+    },
   },
   {
     path: 'validated',
@@ -43,7 +49,10 @@ export const dashboardRoutes: Routes = [
       import('../documents/document-list/document-list.component').then(
         (m) => m.DocumentListComponent,
       ),
-    data: { statusFilter: 'validated' satisfies DocumentStatus },
+    data: {
+      statusFilter: 'validated' satisfies DocumentStatus,
+      pageTitle: 'Validated',
+    },
   },
   {
     path: 'rejected',
@@ -51,6 +60,9 @@ export const dashboardRoutes: Routes = [
       import('../documents/document-list/document-list.component').then(
         (m) => m.DocumentListComponent,
       ),
-    data: { statusFilter: 'rejected' satisfies DocumentStatus },
+    data: {
+      statusFilter: 'rejected' satisfies DocumentStatus,
+      pageTitle: 'Rejected',
+    },
   },
 ];

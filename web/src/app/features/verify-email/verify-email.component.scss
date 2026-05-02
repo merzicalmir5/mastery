@@ -1,4 +1,4 @@
-.forgot-password {
+.verify-email {
   min-height: 100dvh;
   display: grid;
   place-items: center;
@@ -23,12 +23,15 @@
     border-radius: 18px;
     border-color: rgb(var(--app-brand-rgb) / 0.15);
     box-shadow: 0 22px 45px rgba(23, 38, 71, 0.12);
+    display: grid;
+    gap: 0.75rem;
+    justify-items: center;
+    text-align: center;
   }
 
   &__brand {
     display: flex;
     justify-content: center;
-    margin-bottom: 0.2rem;
   }
 
   &__logo {
@@ -40,67 +43,46 @@
   }
 
   &__title {
-    margin: 0 0 0.35rem;
-    text-align: center;
+    margin: 0;
     font-size: 1.1rem;
     font-weight: 700;
-    color: #111827;
-  }
-
-  &__form {
-    display: grid;
-    gap: 0.35rem;
-  }
-
-  &__field {
-    width: 100%;
-  }
-
-  :host ::ng-deep &__field .mat-mdc-text-field-wrapper {
-    height: 2.8rem;
-  }
-
-  :host ::ng-deep &__field .mat-mdc-form-field-flex {
-    height: 100%;
-    align-items: center;
-  }
-
-  :host ::ng-deep &__field .mat-mdc-form-field-infix {
-    min-height: 100%;
-    display: flex;
-    align-items: center;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-  }
-
-  :host ::ng-deep &__field .mat-mdc-input-element {
-    text-align: left;
-    height: 100%;
-    margin: 0;
-    padding: 0 !important;
-    line-height: 2.8rem;
-  }
-
-  :host ::ng-deep &__field input::placeholder {
-    font-size: 0.82rem;
-    text-align: left;
-    opacity: 1;
-  }
-
-  &__submit {
-    margin-top: 0.8rem;
-    width: 100%;
-  }
-
-  &__back-login {
-    margin-top: 0.55rem;
-    text-align: center;
-    font-size: 0.85rem;
     color: var(--app-text-primary);
-    text-decoration: none;
   }
 
-  &__back-login:hover {
-    text-decoration: underline;
+  &__pending {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0;
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--app-text-secondary);
+  }
+
+  &__alert {
+    margin: 0;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: #b3261e;
+    background: rgba(179, 38, 30, 0.08);
+    border: 1px solid rgba(179, 38, 30, 0.25);
+    width: 100%;
+    text-align: left;
+  }
+
+  :host-context(html.theme-dark) &__alert {
+    color: #f2b8b5;
+    background: rgba(242, 184, 181, 0.08);
+    border-color: rgba(242, 184, 181, 0.25);
+  }
+
+  &__login {
+    width: 100%;
+    margin-top: 0.25rem;
   }
 }

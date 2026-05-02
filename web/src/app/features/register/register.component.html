@@ -2,7 +2,11 @@
   <mat-card class="register__card" appearance="outlined">
     <form class="register__form" [formGroup]="registerForm" (ngSubmit)="submit()" novalidate>
       <div class="register__brand">
-        <img class="register__logo" src="/assets/logo.png" alt="Mastery logo" />
+        <img
+          class="register__logo"
+          [src]="theme.isDark() ? '/assets/logo-smart-white-on-dark.png' : '/assets/logo-smart-black-on-light.png'"
+          alt="SMART — Document processing system"
+        />
       </div>
       <h1 class="register__title">Sign up</h1>
 
@@ -58,6 +62,38 @@
         </button>
         @if (registerForm.controls.password.touched && registerForm.controls.password.invalid) {
           <mat-error>Password must be at least 6 characters.</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field class="register__field register__field--password" appearance="outline">
+        <input
+          matInput
+          [type]="hidePasswordConfirm ? 'password' : 'text'"
+          autocomplete="new-password"
+          formControlName="passwordConfirm"
+          placeholder="Confirm password"
+          aria-label="Confirm password"
+        />
+        <button
+          mat-icon-button
+          matSuffix
+          type="button"
+          (click)="hidePasswordConfirm = !hidePasswordConfirm"
+          [attr.aria-label]="hidePasswordConfirm ? 'Show confirm password' : 'Hide confirm password'"
+        >
+          <mat-icon>{{ hidePasswordConfirm ? 'visibility' : 'visibility_off' }}</mat-icon>
+        </button>
+        @if (
+          registerForm.controls.passwordConfirm.touched &&
+          registerForm.controls.passwordConfirm.hasError('required')
+        ) {
+          <mat-error>Confirmation is required.</mat-error>
+        }
+        @if (
+          registerForm.controls.passwordConfirm.touched &&
+          registerForm.controls.passwordConfirm.hasError('mismatch')
+        ) {
+          <mat-error>Passwords do not match.</mat-error>
         }
       </mat-form-field>
 

@@ -1,6 +1,6 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable, map, tap } from 'rxjs';
+import { EMPTY, Observable, filter, map, mergeMap, of, tap } from 'rxjs';
 import { API_URL } from '../../../core/config/api-url.token';
 import type {
   DocumentKind,
@@ -74,6 +74,10 @@ export type DocumentLineItemPatch = {
   unitPrice: number;
   lineTotal: number;
 };
+
+export type UploadFileEvent =
+  | { type: 'progress'; loaded: number; total?: number }
+  | { type: 'done'; record: DocumentRecord };
 
 function mapStatus(s: string): DocumentStatus {
   const m: Record<string, DocumentStatus> = {
@@ -184,13 +188,42 @@ export class DocumentService {
     );
   }
 
-  /** Multipart upload; runs extraction on the server. */
-  uploadFile(file: File): Observable<DocumentRecord> {
+  uploadFileEvents(file: File): Observable<UploadFileEvent> {
     const body = new FormData();
     body.append('file', file);
-    return this.http.post<DocumentApiRow>(`${this.apiUrl}/documents/upload`, body).pipe(
-      map(mapRow),
-      tap((rec) => this.upsert(rec)),
+    return this.http
+      .post<DocumentApiRow>(`${this.apiUrl}/documents/upload`, body, {
+        reportProgress: true,
+        observe: 'events',
+      })
+      .pipe(
+        mergeMap((event) => {
+          if (event.type === HttpEventType.UploadProgress) {
+            return of({
+              type: 'progress' as const,
+              loaded: event.loaded,
+              total: event.total ?? undefined,
+            });
+          }
+          if (event.type === HttpEventType.Response) {
+            const res = event as HttpResponse<DocumentApiRow>;
+            const row = res.body;
+            if (!row) {
+              return EMPTY;
+            }
+            const rec = mapRow(row);
+            this.upsert(rec);
+            return of({ type: 'done' as const, record: rec });
+          }
+          return EMPTY;
+        }),
+      );
+  }
+
+  uploadFile(file: File): Observable<DocumentRecord> {
+    return this.uploadFileEvents(file).pipe(
+      filter((e): e is { type: 'done'; record: DocumentRecord } => e.type === 'done'),
+      map((e) => e.record),
     );
   }
 

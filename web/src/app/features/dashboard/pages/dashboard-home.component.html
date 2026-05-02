@@ -1,5 +1,4 @@
 <section class="dash-home">
-  <h1 class="dash-home__title">Overview</h1>
   <p class="dash-home__subtitle">
     Quick snapshot of ingestion, validation status, and workflow progress.
   </p>
@@ -94,19 +93,6 @@
         <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
       </table>
       <div class="dash-home__pagination">
-        <div class="dash-home__pagination-left">
-          <button mat-stroked-button type="button" (click)="prevPage()" [disabled]="page() <= 1">
-            Previous
-          </button>
-          <button
-            mat-stroked-button
-            type="button"
-            (click)="nextPage()"
-            [disabled]="page() >= totalPages()"
-          >
-            Next
-          </button>
-        </div>
         <div class="dash-home__pagination-center">Page {{ page() }} / {{ totalPages() }}</div>
         <div class="dash-home__pagination-right">
           <label class="dash-home__page-size">
@@ -118,6 +104,28 @@
             </select>
           </label>
           <span class="dash-home__total">Total {{ totalRows() }}</span>
+          <div class="dash-home__pagination-nav" role="group" aria-label="Page navigation">
+            <button
+              mat-stroked-button
+              type="button"
+              class="dash-home__pagination-icon-btn"
+              (click)="prevPage()"
+              [disabled]="page() <= 1"
+              aria-label="Previous page"
+            >
+              <mat-icon>chevron_left</mat-icon>
+            </button>
+            <button
+              mat-stroked-button
+              type="button"
+              class="dash-home__pagination-icon-btn"
+              (click)="nextPage()"
+              [disabled]="page() >= totalPages()"
+              aria-label="Next page"
+            >
+              <mat-icon>chevron_right</mat-icon>
+            </button>
+          </div>
         </div>
       </div>
     }

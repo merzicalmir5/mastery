@@ -1,10 +1,4 @@
 .dash-home {
-  &__title {
-    margin: 0 0 0.35rem;
-    font-size: 1.35rem;
-    font-weight: 700;
-  }
-
   &__subtitle {
     margin: 0 0 1.1rem;
     color: var(--app-text-secondary);
@@ -104,12 +98,6 @@
     max-width: 28rem;
   }
 
-  &__delete {
-    border-radius: 8px !important;
-    font-size: 0.82rem;
-    line-height: 1.2;
-  }
-
   &__pagination {
     margin-top: 0.75rem;
     display: flex;
@@ -120,14 +108,34 @@
     padding: 0.65rem 0.75rem;
     border: 1px solid rgba(17, 24, 39, 0.1);
     border-radius: 10px;
-    background: rgba(31, 111, 235, 0.03);
+    background: rgb(var(--app-brand-rgb) / 0.03);
   }
 
-  &__pagination-left,
   &__pagination-right {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
+    margin-left: auto;
+    justify-content: flex-end;
+  }
+
+  &__pagination-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  &__pagination-icon-btn {
+    min-width: 2.75rem !important;
+    padding: 0 0.45rem !important;
+
+    mat-icon {
+      margin: 0 !important;
+      font-size: 1.35rem;
+      width: 1.35rem;
+      height: 1.35rem;
+    }
   }
 
   &__pagination-center {

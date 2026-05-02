@@ -13,12 +13,43 @@ I usually run Postgres locally (Docker or a native install), point `DATABASE_URL
 
 ## Live deployment
 
-After you ship to your host(s), drop the links here so reviewers can open the app without cloning:
+Public URLs (no Docker required to try the hosted app):
 
-- **Web:** *(not deployed yet — e.g. `https://…vercel.app`)*  
-- **API:** *(not deployed yet — e.g. `https://…railway.app`)*  
+- **Web (frontend):** [https://web-nu-ten-40.vercel.app/login](https://web-nu-ten-40.vercel.app/login)  
+- **API (backend + Swagger):** [https://mastery-production-9a44.up.railway.app/](https://mastery-production-9a44.up.railway.app/) — Swagger UI is at `/api/docs`.
 
-For production, set the API’s `FRONTEND_BASE_URL` to your real SPA origin (CORS), and build the web app with `API_URL` pointing at the public API base URL (see the **Production build** subsection under Web).
+For production, the API’s `FRONTEND_BASE_URL` must match the Vercel origin (CORS), and the web production build must set **`API_URL`** to the public API base URL (see **Production build** under Web).
+
+---
+
+## Run everything with Docker (full stack locally)
+
+Share these steps with anyone who clones the repo and wants Postgres + API + web in one go.
+
+**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS) or Docker Engine + Compose on Linux.
+
+From the **repository root** (the folder that contains `docker-compose.yml`):
+
+```bash
+cp .env.docker.example .env
+```
+
+On **Windows (PowerShell or CMD):** `copy .env.docker.example .env`
+
+Then edit `.env` (strong `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`; optional SendGrid; change `API_URL` only if the browser should call a different API base than `http://localhost:3000`). Start the stack:
+
+```bash
+docker compose up --build
+```
+
+Then open:
+
+- **App:** [http://localhost:4200](http://localhost:4200)  
+- **API / Swagger:** [http://localhost:3000](http://localhost:3000) and [http://localhost:3000/api/docs](http://localhost:3000/api/docs)
+
+Stop containers: `Ctrl+C`, then `docker compose down`. To remove database volumes as well: `docker compose down -v`.
+
+**Note:** Compose reads **`mastery/.env`** at the repo root (not `api/.env`). Variables like `${JWT_ACCESS_SECRET}` and `${API_URL}` are substituted into `docker-compose.yml`. For local development without Docker, use `api/.env` and `npm start` in `api` / `web` as below.
 
 ---
 
@@ -72,13 +103,3 @@ npm run build
 Serve the `dist/` output behind HTTPS and keep the API’s `FRONTEND_BASE_URL` in sync.
 
 ---
-
-## What we skipped on purpose
-
-No Docker Compose file in this tree yet — you can add one around the same Postgres + API + web flow if you want a one-command demo.
-
----
-
-## License
-
-Private / coursework — adjust if you publish publicly.

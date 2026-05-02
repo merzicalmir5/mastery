@@ -1,0 +1,24 @@
+<section class="verify-email">
+  <mat-card class="verify-email__card" appearance="outlined">
+    <div class="verify-email__brand">
+      <img
+        class="verify-email__logo"
+        [src]="theme.isDark() ? '/assets/logo-smart-white-on-dark.png' : '/assets/logo-smart-black-on-light.png'"
+        alt="SMART — Document processing system"
+      />
+    </div>
+    <h1 class="verify-email__title">Email verification</h1>
+
+    @if (loading()) {
+      <div class="verify-email__pending">
+        <mat-spinner diameter="36" />
+        <p class="verify-email__hint">Verifying your email…</p>
+      </div>
+    }
+
+    @if (!loading() && errorMessage()) {
+      <p class="verify-email__alert" role="alert">{{ errorMessage() }}</p>
+      <a mat-stroked-button class="verify-email__login" routerLink="/login">Back to login</a>
+    }
+  </mat-card>
+</section>

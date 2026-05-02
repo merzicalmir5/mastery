@@ -7,7 +7,11 @@ $mastery-light-theme: mat.define-theme(
     color: (
       theme-type: light,
       primary: mat.$azure-palette,
-      tertiary: mat.$blue-palette,
+      tertiary: mat.$violet-palette,
+    ),
+    typography: (
+      plain-family: (Montserrat, sans-serif),
+      brand-family: (Montserrat, sans-serif),
     ),
     density: (
       scale: 0,
@@ -20,7 +24,11 @@ $mastery-dark-theme: mat.define-theme(
     color: (
       theme-type: dark,
       primary: mat.$azure-palette,
-      tertiary: mat.$blue-palette,
+      tertiary: mat.$violet-palette,
+    ),
+    typography: (
+      plain-family: (Montserrat, sans-serif),
+      brand-family: (Montserrat, sans-serif),
     ),
     density: (
       scale: 0,
@@ -32,6 +40,9 @@ html {
   color-scheme: light;
   @include mat.all-component-themes($mastery-light-theme);
 
+  --app-brand: #1d2636;
+  --app-brand-rgb: 29 38 54;
+
   --app-text-primary: #000000;
   --app-text-secondary: #000000;
   --app-text-tertiary: #000000;
@@ -41,8 +52,19 @@ html {
   --dash-surface-muted: #fafbfc;
   --dash-border: rgba(17, 24, 39, 0.14);
   --dash-border-strong: rgba(17, 24, 39, 0.22);
-  --dash-nav-active-border: rgba(31, 111, 235, 0.45);
-  --dash-nav-active-bg: rgba(31, 111, 235, 0.08);
+  --dash-nav-active-border: rgb(var(--app-brand-rgb) / 0.45);
+  --dash-nav-active-bg: rgb(var(--app-brand-rgb) / 0.08);
+
+  @include mat.theme-overrides(
+    (
+      primary: #1d2636,
+      on-primary: #f8fafc,
+      inverse-primary: #cbd5e1,
+      surface-tint: #1d2636,
+      tertiary: #1d2636,
+      on-tertiary: #f8fafc,
+    )
+  );
   --dash-icon-muted: #000000;
 
   --status-uploaded: #64748b;
@@ -68,8 +90,19 @@ html.theme-dark {
   --dash-surface-muted: #252525;
   --dash-border: rgba(255, 255, 255, 0.12);
   --dash-border-strong: rgba(255, 255, 255, 0.2);
-  --dash-nav-active-border: rgba(96, 165, 250, 0.55);
-  --dash-nav-active-bg: rgba(96, 165, 250, 0.12);
+  --dash-nav-active-border: rgb(var(--app-brand-rgb) / 0.55);
+  --dash-nav-active-bg: rgb(var(--app-brand-rgb) / 0.22);
+
+  @include mat.theme-overrides(
+    (
+      primary: #1d2636,
+      on-primary: #f1f5f9,
+      inverse-primary: #94a3b8,
+      surface-tint: #1d2636,
+      tertiary: #1d2636,
+      on-tertiary: #f1f5f9,
+    )
+  );
   --dash-icon-muted: #ffffff;
 
   --status-uploaded: #94a3b8;
@@ -89,7 +122,7 @@ body {
 
 body {
   margin: 0;
-  font-family: Roboto, 'Helvetica Neue', sans-serif;
+  font-family: Montserrat, system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: var(--app-page-bg);
   color: var(--app-text-primary);
   transition:
@@ -116,4 +149,88 @@ textarea.mat-mdc-input-element {
 .mat-mdc-form-field-hint-wrapper,
 .mat-mdc-form-field-error {
   color: var(--app-text-primary);
+}
+
+// Primary actions & outlines — match login (`mat-flat-button` = unelevated): square, bordered, card fill.
+.mat-mdc-unelevated-button.mdc-button.mat-mdc-button-base {
+  min-height: 2.8rem;
+  height: auto;
+  padding: 0 1rem;
+  font-weight: 600 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background-color: var(--app-card-surface) !important;
+  color: var(--app-text-primary) !important;
+  border: 1px solid var(--app-text-primary) !important;
+}
+
+.mat-mdc-unelevated-button.mat-warn:not(:disabled),
+.mat-mdc-unelevated-button.mat-mdc-button-base.mat-warn:not(:disabled) {
+  min-height: 2.8rem;
+  height: auto;
+  padding: 0 1rem;
+  font-weight: 600 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background-color: var(--app-card-surface) !important;
+  color: var(--mat-sys-error, #b3261e) !important;
+  border: 1px solid var(--mat-sys-error, #b3261e) !important;
+}
+
+.mat-mdc-outlined-button.mdc-button.mat-mdc-button-base:not(.mat-warn) {
+  min-height: 2.8rem;
+  height: auto;
+  padding: 0 1rem;
+  font-weight: 600 !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+  color: var(--app-text-primary) !important;
+  border-color: var(--app-text-primary) !important;
+}
+
+.dashboard__sidenav .mat-mdc-outlined-button.dashboard__logout.mdc-button.mat-mdc-button-base:not(.mat-warn) {
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  background-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+.dashboard__sidenav .mat-mdc-outlined-button.dashboard__logout .mdc-button__label,
+.dashboard__sidenav .mat-mdc-outlined-button.dashboard__logout .mat-icon {
+  color: #ffffff !important;
+}
+
+.dashboard__sidenav .mat-mdc-outlined-button.dashboard__logout:hover:not(:disabled) {
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  background-color: rgba(255, 255, 255, 0.11) !important;
+}
+
+.mat-mdc-outlined-button.mat-warn:not(:disabled),
+.mat-mdc-outlined-button.mat-mdc-button-base.mat-warn:not(:disabled) {
+  min-height: 2.8rem;
+  height: auto;
+  padding: 0 1rem;
+  font-weight: 600 !important;
+  border-radius: 0 !important;
+  color: var(--mat-sys-error, #b3261e) !important;
+  border: 1px solid var(--mat-sys-error, #b3261e) !important;
+  background-color: transparent !important;
+}
+
+.mat-mdc-button.mdc-button.mat-mdc-button-base:not(.mat-mdc-icon-button):not(.mat-mdc-outlined-button):not(.mat-mdc-unelevated-button):not(.mat-mdc-raised-button):not(.mat-tonal-button) {
+  min-height: 2.8rem;
+  font-weight: 600 !important;
+  border-radius: 0 !important;
+  padding: 0 1rem !important;
+  color: var(--app-text-primary) !important;
+}
+
+.mat-mdc-raised-button.mdc-button.mat-mdc-button-base {
+  min-height: 2.8rem;
+  font-weight: 600 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border: 1px solid var(--app-text-primary) !important;
+  background-color: var(--app-card-surface) !important;
+  color: var(--app-text-primary) !important;
 }

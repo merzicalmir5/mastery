@@ -25,6 +25,18 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'verify-email',
+    loadComponent: () =>
+      import('./features/verify-email/verify-email.component').then((m) => m.VerifyEmailComponent),
+  },
+  {
+    path: 'reset-password',
+    loadComponent: () =>
+      import('./features/reset-password/reset-password.component').then(
+        (m) => m.ResetPasswordComponent,
+      ),
+  },
+  {
     path: 'dashboard',
     canActivate: [authGuard],
     loadComponent: () =>

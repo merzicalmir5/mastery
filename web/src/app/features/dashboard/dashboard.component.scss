@@ -36,8 +36,8 @@
     --sidebar-card-border: rgba(255, 255, 255, 0.14);
     --sidebar-hover-bg: rgba(255, 255, 255, 0.11);
     --sidebar-hover-border: rgba(255, 255, 255, 0.22);
-    --sidebar-active-bg: rgba(59, 130, 246, 0.22);
-    --sidebar-active-border: rgba(147, 197, 253, 0.45);
+    --sidebar-active-bg: rgba(255, 255, 255, 0.12);
+    --sidebar-active-border: rgba(255, 255, 255, 0.38);
     --sidebar-icon: rgba(241, 245, 249, 0.88);
 
     width: var(--dashboard-sidebar-width);
@@ -115,7 +115,7 @@
     }
 
     &:focus-visible {
-      outline: 2px solid rgba(147, 197, 253, 0.65);
+      outline: 2px solid rgba(255, 255, 255, 0.55);
       outline-offset: 2px;
     }
 
@@ -129,24 +129,49 @@
     color: inherit;
     font-size: 0.95rem;
     font-weight: 700;
-    font-family:
-      system-ui,
-      -apple-system,
-      'Segoe UI',
-      Roboto,
-      sans-serif;
+    font-family: Montserrat, system-ui, -apple-system, 'Segoe UI', sans-serif;
     margin-top: -0.05em;
   }
 
   &__brand {
     display: flex;
+    flex-direction: column;
     justify-content: center;
-    align-items: center;
+    align-items: stretch;
     flex-shrink: 0;
     width: 100%;
     min-height: 3.75rem;
-    padding: 0.65rem 0.75rem 0.55rem;
+    padding: 0.65rem 0 0.55rem;
     box-sizing: border-box;
+    gap: 0.45rem;
+  }
+
+  &__user {
+    width: 100%;
+    padding: 0.35rem 0.55rem 0;
+    text-align: left;
+    box-sizing: border-box;
+    align-self: stretch;
+  }
+
+  &__user-line {
+    display: block;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__user-prefix {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--sidebar-muted);
+  }
+
+  &__user-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #ffffff;
   }
 
   &__logo {
@@ -155,6 +180,7 @@
     max-width: 92%;
     height: 2.75rem;
     margin-inline: auto;
+    align-self: center;
     object-fit: contain;
   }
 
@@ -235,7 +261,7 @@
     border-width: 1px !important;
     border-style: solid !important;
     border-color: var(--sidebar-card-border) !important;
-    color: var(--sidebar-text) !important;
+    color: #ffffff !important;
     background: var(--sidebar-card-bg) !important;
     box-sizing: border-box;
     transition:
@@ -245,6 +271,7 @@
     &:hover {
       border-color: var(--sidebar-hover-border) !important;
       background: var(--sidebar-hover-bg) !important;
+      color: #ffffff !important;
     }
 
     mat-icon {
@@ -252,8 +279,12 @@
       width: 1.28rem !important;
       height: 1.28rem !important;
       margin-right: 0.55rem !important;
-      color: var(--sidebar-icon) !important;
+      color: #ffffff !important;
     }
+  }
+
+  :host ::ng-deep .dashboard__logout .mdc-button__label {
+    color: #ffffff !important;
   }
 
   &__content {
@@ -285,8 +316,10 @@
   }
 
   &__toolbar-title {
-    font-weight: 600;
-    font-size: 0.95rem;
+    font-weight: 700;
+    font-size: 1.35rem;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -299,7 +332,11 @@
   }
 
   &__main {
+    display: flex;
+    flex-direction: column;
     flex: 1;
+    min-height: 0;
     padding: 1.25rem;
+    box-sizing: border-box;
   }
 }

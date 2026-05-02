@@ -2,6 +2,7 @@ import { CommonModule, DecimalPipe, SlicePipe } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
+import { MatIconModule } from '@angular/material/icon';
 import { MatTableModule } from '@angular/material/table';
 import type { DocumentRecord, DocumentStatus } from '../../documents/models/document.models';
 import { DocumentService } from '../../documents/services/document.service';
@@ -11,7 +12,15 @@ type DashboardStatTone = 'neutral' | 'needs_review' | 'validated' | 'rejected';
 @Component({
   selector: 'app-dashboard-home',
   standalone: true,
-  imports: [CommonModule, MatCardModule, MatTableModule, MatButtonModule, SlicePipe, DecimalPipe],
+  imports: [
+    CommonModule,
+    MatCardModule,
+    MatTableModule,
+    MatButtonModule,
+    MatIconModule,
+    SlicePipe,
+    DecimalPipe,
+  ],
   templateUrl: './dashboard-home.component.html',
   styleUrl: './dashboard-home.component.scss',
 })

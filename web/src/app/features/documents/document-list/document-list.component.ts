@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
 import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -17,6 +18,7 @@ import { DocumentService } from '../services/document.service';
     RouterLink,
     MatTableModule,
     MatButtonModule,
+    MatIconModule,
     MatTooltipModule,
   ],
   templateUrl: './document-list.component.html',
@@ -39,20 +41,6 @@ export class DocumentListComponent implements OnInit {
     return this.documents.list(this.statusFilter());
   });
   readonly pageMeta = computed(() => this.documents.pageMeta());
-
-  readonly pageTitle = computed(() => {
-    const f = this.statusFilter();
-    if (f === undefined) {
-      return 'All documents';
-    }
-    const map: Record<DocumentStatus, string> = {
-      uploaded: 'Uploaded',
-      needs_review: 'Needs review',
-      validated: 'Validated',
-      rejected: 'Rejected',
-    };
-    return map[f] ?? 'Documents';
-  });
 
   readonly displayedColumns: string[] = [
     'fileName',
