@@ -1,8 +1,11 @@
 """
-Lightweight OCR HTTP API for NestJS (EasyOCR).
-Run: uvicorn main:app --host 0.0.0.0 --port 8000
-Railway: uvicorn with $PORT. EasyOCR loads on first /ocr/image by default (saves RAM);
-set OCR_WARMUP_ON_STARTUP=1 to preload at boot if the host has enough memory.
+OCR HTTP API for NestJS (FastAPI).
+
+Default engine is **Tesseract** (low RAM, fits small Railway/free tiers).
+Set OCR_ENGINE=easyocr for EasyOCR (requires image built with INSTALL_EASYOCR=true).
+
+Env: OCR_ENGINE=tesseract|easyocr, TESSERACT_LANG (default eng), TESSERACT_CMD (full path to
+tesseract.exe on Windows if not on PATH), OCR_WARMUP_ON_STARTUP=1 only for EasyOCR preload.
 """
 
 from __future__ import annotations
@@ -11,7 +14,9 @@ import io
 import logging
 import os
 import re
+import shutil
 import statistics
+import subprocess
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -92,6 +97,125 @@ def preprocess_for_easyocr(img: Image.Image) -> np.ndarray:
     contrast = float(os.getenv("OCR_CONTRAST", "1.35"))
     gray = ImageEnhance.Contrast(gray).enhance(contrast)
     return np.array(gray.convert("RGB"))
+
+
+def _resolve_ocr_engine() -> str:
+    e = os.getenv("OCR_ENGINE", "tesseract").strip().lower()
+    return e if e in ("tesseract", "easyocr") else "tesseract"
+
+
+_tesseract_cmd_checked = False
+
+
+def _configure_pytesseract() -> None:
+    """Point pytesseract at the tesseract binary (PATH, TESSERACT_CMD, or common Windows paths)."""
+    global _tesseract_cmd_checked
+    if _tesseract_cmd_checked:
+        return
+
+    import pytesseract
+
+    def _apply(cmd: str) -> bool:
+        cmd = cmd.strip().strip('"')
+        if cmd and os.path.isfile(cmd):
+            pytesseract.pytesseract.tesseract_cmd = cmd
+            log.info("using Tesseract binary at %s", cmd)
+            return True
+        return False
+
+    explicit = os.getenv("TESSERACT_CMD", "").strip()
+    if explicit:
+        if _apply(explicit):
+            _tesseract_cmd_checked = True
+            return
+        log.warning("TESSERACT_CMD is set but file not found: %s", explicit)
+
+    w = shutil.which("tesseract")
+    if w and _apply(w):
+        _tesseract_cmd_checked = True
+        return
+
+    for path in (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ):
+        if _apply(path):
+            _tesseract_cmd_checked = True
+            return
+
+    # Windows: installer sometimes adds to PATH only for new shells; where.exe still finds it.
+    if os.name == "nt":
+        try:
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            r = subprocess.run(
+                ["where.exe", "tesseract"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=creationflags,
+            )
+            if r.returncode == 0 and r.stdout:
+                first = r.stdout.strip().splitlines()[0].strip()
+                if _apply(first):
+                    _tesseract_cmd_checked = True
+                    return
+        except Exception:
+            pass
+
+    _tesseract_cmd_checked = True
+    log.warning(
+        "Tesseract executable not found. Install it or set TESSERACT_CMD to tesseract.exe "
+        "(winget install UB-Mannheim.TesseractOCR)."
+    )
+
+
+def run_tesseract_ocr(img: Image.Image) -> list[dict[str, Any]]:
+    """Tesseract word boxes → same line dict shape as the EasyOCR path."""
+    import pytesseract
+    from pytesseract import Output
+
+    _configure_pytesseract()
+
+    arr = preprocess_for_easyocr(img)
+    pil = Image.fromarray(arr)
+    lang = os.getenv("TESSERACT_LANG", "eng").strip() or "eng"
+
+    data = pytesseract.image_to_data(pil, lang=lang, output_type=Output.DICT)
+    raw: list[tuple[Any, str, float]] = []
+    n = len(data["text"])
+    for i in range(n):
+        text = (data["text"][i] or "").strip()
+        if not text:
+            continue
+        try:
+            conf = int(float(data["conf"][i]))
+        except (ValueError, TypeError):
+            continue
+        if conf < 0:
+            continue
+        left = int(data["left"][i])
+        top = int(data["top"][i])
+        w = int(data["width"][i])
+        h = int(data["height"][i])
+        bbox = [
+            [float(left), float(top)],
+            [float(left + w), float(top)],
+            [float(left + w), float(top + h)],
+            [float(left), float(top + h)],
+        ]
+        raw.append((bbox, text, conf / 100.0))
+
+    raw = sort_detections_reading_order(raw)
+    lines: list[dict[str, Any]] = []
+    for bbox, text, conf in raw:
+        lines.append(
+            {
+                "text": text.strip(),
+                "confidence": float(conf),
+                "bbox": sanitize_bbox(bbox),
+            }
+        )
+    return lines
 
 
 _QUANTITY_RE = re.compile(r"^[1-9]\d{0,3}$")
@@ -616,22 +740,22 @@ def inject_implicit_quantity_before_each_rows(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Avoid loading EasyOCR at startup: model + PyTorch spike RAM and get OOM-killed on small
-    hosts (e.g. Railway free). First POST /ocr/image may take longer while models load.
-    Set OCR_WARMUP_ON_STARTUP=1 to preload at boot when you have enough memory.
-    """
-    warmup = os.getenv("OCR_WARMUP_ON_STARTUP", "").lower() in ("1", "true", "yes")
+    eng = _resolve_ocr_engine()
+    log.info("OCR engine=%s", eng)
+    warmup = (
+        os.getenv("OCR_WARMUP_ON_STARTUP", "").lower() in ("1", "true", "yes")
+        and eng == "easyocr"
+    )
     if warmup:
         try:
             _get_reader()
             log.info("EasyOCR reader ready (OCR_WARMUP_ON_STARTUP)")
         except Exception as e:
             log.exception("failed to init EasyOCR: %s", e)
+    elif eng == "easyocr":
+        log.info("EasyOCR loads on first /ocr/image unless OCR_WARMUP_ON_STARTUP=1")
     else:
-        log.info(
-            "EasyOCR deferred to first /ocr/image (no OCR_WARMUP_ON_STARTUP); saves RAM at boot"
-        )
+        log.info("Tesseract backend — using system tesseract-ocr (no PyTorch preload)")
     yield
 
 
@@ -657,12 +781,14 @@ def root():
         "docs": "/docs",
         "health": "/health",
         "ocr": "POST /ocr/image (multipart file)",
+        "defaultEngine": _resolve_ocr_engine(),
+        "hint": "Set OCR_ENGINE=tesseract|easyocr on the server",
     }
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "engine": "easyocr"}
+    return {"ok": True, "engine": _resolve_ocr_engine()}
 
 
 @app.post("/ocr/image")
@@ -680,34 +806,54 @@ async def ocr_image(file: UploadFile = File(...)) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid image: {e}") from e
 
-    arr = preprocess_for_easyocr(img)
-    reader = _get_reader()
-    mag_ratio = float(os.getenv("OCR_MAG_RATIO", "2.0"))
-    canvas_size = int(os.getenv("OCR_CANVAS_SIZE", "2560"))
-    try:
-        detections = reader.readtext(
-            arr,
-            paragraph=False,
-            mag_ratio=mag_ratio,
-            canvas_size=canvas_size,
-        )
-    except Exception as e:
-        log.exception("readtext failed")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    engine = _resolve_ocr_engine()
+    lines: list[dict[str, Any]]
 
-    detections = sort_detections_reading_order(detections)
-
-    lines: list[dict[str, Any]] = []
-
-    for bbox, text, conf in detections:
-        if text and text.strip():
-            lines.append(
-                {
-                    "text": text.strip(),
-                    "confidence": float(conf),
-                    "bbox": sanitize_bbox(bbox),
-                }
+    if engine == "easyocr":
+        arr = preprocess_for_easyocr(img)
+        reader = _get_reader()
+        mag_ratio = float(os.getenv("OCR_MAG_RATIO", "2.0"))
+        canvas_size = int(os.getenv("OCR_CANVAS_SIZE", "2560"))
+        try:
+            detections = reader.readtext(
+                arr,
+                paragraph=False,
+                mag_ratio=mag_ratio,
+                canvas_size=canvas_size,
             )
+        except Exception as e:
+            log.exception("readtext failed")
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+        detections = sort_detections_reading_order(detections)
+        lines = []
+        for bbox, text, conf in detections:
+            if text and text.strip():
+                lines.append(
+                    {
+                        "text": text.strip(),
+                        "confidence": float(conf),
+                        "bbox": sanitize_bbox(bbox),
+                    }
+                )
+    else:
+        try:
+            lines = run_tesseract_ocr(img)
+        except Exception as e:
+            log.exception("tesseract ocr failed")
+            from pytesseract.pytesseract import TesseractNotFoundError
+
+            msg = str(e).lower()
+            if isinstance(e, TesseractNotFoundError) or "tesseract is not installed" in msg or "not in your path" in msg:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Tesseract binary not found. Install Tesseract (Windows: winget install "
+                        "UB-Mannheim.TesseractOCR) or set env TESSERACT_CMD to the full path of "
+                        "tesseract.exe."
+                    ),
+                ) from e
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     structured_line_items = extract_structured_line_items(lines)
 
@@ -719,7 +865,7 @@ async def ocr_image(file: UploadFile = File(...)) -> dict[str, Any]:
     avg_conf = sum(conf_all) / len(conf_all) if conf_all else None
 
     return {
-        "engine": "easyocr",
+        "engine": engine,
         "fullText": full_text,
         "confidence": avg_conf,
         "lines": lines,
