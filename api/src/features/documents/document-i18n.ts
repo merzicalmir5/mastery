@@ -1,26 +1,41 @@
-/**
- * Multilingual invoice / PO label hints for regex extraction (Latin script + common business English).
- * Accent-aware matching uses Unicode flag where useful.
- */
-
-/** Escape string for use inside RegExp character class or alternation */
 function esc(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Build `Label\s*:\s*(capture)` for each label */
 function labelCapture(labels: string[], flags = 'imu'): RegExp {
   const alt = labels.map(esc).join('|');
   return new RegExp(`(?:${alt})\\s*[:.]?\\s*([^\\n\\r]+)`, flags);
 }
 
-/** Same but allow # before number */
+function labelCaptureMoneyAmount(labels: string[], flags = 'imu'): RegExp {
+  const parts = labels.map((lab) => (lab === 'Total' ? '\\bTotal\\b' : esc(lab)));
+  const alt = parts.join('|');
+  const amount = '([\\-+]?\\d[\\d.,]*)';
+  return new RegExp(
+    `(?:${alt})\\s*[:.]?\\s*(?:€|£|\\$|EUR|USD|GBP|CHF)?\\s*${amount}`,
+    flags,
+  );
+}
+
+function lastCaptureGroup(re: RegExp, text: string, groupIdx = 1): string | null {
+  const globalFlags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const r = new RegExp(re.source, globalFlags);
+  let last: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = r.exec(text)) !== null) {
+    const cap = m[groupIdx];
+    if (cap != null && cap !== '') {
+      last = cap;
+    }
+  }
+  return last;
+}
+
 function labelHashCapture(labels: string[]): RegExp {
   const alt = labels.map(esc).join('|');
   return new RegExp(`(?:${alt})\\s*#?\\s*[:.]?\\s*([A-Z0-9\\-_.\\/]+)`, 'imu');
 }
 
-// --- Supplier / vendor (issuer side of invoice) ---
 const SUPPLIER_LABELS = [
   'Supplier',
   'Vendor',
@@ -66,7 +81,6 @@ const SUPPLIER_LABELS = [
   'Dodávateľ',
 ];
 
-// --- Document numbers ---
 const INVOICE_NUMBER_LABELS = [
   'Invoice number',
   'Invoice no',
@@ -140,7 +154,6 @@ const PO_NUMBER_LABELS = [
 
 const GENERIC_NUMBER_LABELS = ['Number', 'No', 'Nr', 'N°', 'Nº', '#'];
 
-// --- Totals ---
 const SUBTOTAL_LABELS = [
   'Subtotal',
   'Sub-total',
@@ -212,7 +225,6 @@ const TOTAL_LABELS = [
   'Ödenecek tutar',
 ];
 
-// --- Dates ---
 const ISSUE_DATE_LABELS = [
   'Issue date',
   'Invoice date',
@@ -257,17 +269,16 @@ export const I18N_REGEX = {
   genericNumberLine: labelCapture(GENERIC_NUMBER_LABELS),
   invoiceNumberHash: labelHashCapture(['Invoice', 'Facture', 'Rechnung', 'Faktura', 'Fattura']),
   poNumberHash: labelHashCapture(['PO', 'P.O.', 'Bestellung', 'Narudžbenica', 'Pedido']),
-  subtotalLine: labelCapture(SUBTOTAL_LABELS),
+  subtotalLine: labelCaptureMoneyAmount(SUBTOTAL_LABELS),
   taxLine: new RegExp(
-    `(?:${[...TAX_LABELS.map(esc), 'Tax\\s*\\([^\\)]+\\)'].join('|')})\\s*[:.]?\\s*([\\d.,\\s]+)`,
+    `(?:${[...TAX_LABELS.map(esc), 'Tax\\s*\\([^\\)]+\\)'].join('|')})\\s*[:.]?\\s*(?:€|£|\\$|EUR|USD|GBP|CHF)?\\s*([\\-+]?\\d[\\d.,]*)`,
     'imu',
   ),
-  totalLine: labelCapture(TOTAL_LABELS),
+  totalLine: labelCaptureMoneyAmount(TOTAL_LABELS),
   issueDateLine: labelCapture(ISSUE_DATE_LABELS),
   dueDateLine: labelCapture(DUE_DATE_LABELS),
 };
 
-/** Strong invoice-related words (any language in list) */
 const INVOICE_WORDS =
   /\b(invoice|tax\s*invoice|facture|factura|rechnung|fattura|faktura|račun|racun|számla|arve|factuur)\b/i;
 
@@ -291,15 +302,51 @@ export function classifyDocTypeHint(text: string): 'INVOICE' | 'PURCHASE_ORDER' 
   return null;
 }
 
-/** ISO 4217 + common symbols (extend as needed) */
-export const CURRENCY_FINDER =
-  /\b(EUR|USD|GBP|CHF|BAM|RSD|HRK|MKD|ALL|MDL|RON|BGN|TRY|PLN|CZK|HUF|SEK|NOK|DKK|ISK|RUB|UAH|BYN|AED|SAR|QAR|KWD|INR|CNY|JPY|KRW|SGD|HKD|AUD|NZD|CAD|MXN|BRL|ZAR|EGP)\b/i;
+const ISO_CURRENCY_CODES =
+  'EUR|USD|GBP|CHF|BAM|RSD|HRK|MKD|ALL|MDL|RON|BGN|TRY|PLN|CZK|HUF|SEK|NOK|DKK|ISK|RUB|UAH|BYN|AED|SAR|QAR|KWD|INR|CNY|JPY|KRW|SGD|HKD|AUD|NZD|CAD|MXN|BRL|ZAR|EGP';
 
-/** Additional meta keys (normalized snake_case) that map to canonical fields */
-/** CSV header cell matching (first row) */
+export const CURRENCY_FINDER = new RegExp(`\\b(${ISO_CURRENCY_CODES})\\b`, 'i');
+
+export function extractCurrencyLoose(text: string): string | null {
+  const t = text.replace(/\r/g, '\n');
+  const codes = ISO_CURRENCY_CODES;
+
+  const fromTotal = new RegExp(
+    `\\b(?:(?:grand\\s+)?total|ukupno)\\b\\s*[:.]?\\s*[\\d.,\\s]+\\s*(?:€|£|\\$)?\\s*(${codes})\\b`,
+    'im',
+  );
+  const mTotal = fromTotal.exec(t);
+  if (mTotal?.[1]) {
+    return mTotal[1].toUpperCase();
+  }
+
+  const amountThenCode = new RegExp(
+    `(?:^|[\\s,;|])([\\d][\\d.,]*)\\s+(?:€|£|\\$)?\\s*(${codes})\\b`,
+    'gim',
+  );
+  let lastCode: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = amountThenCode.exec(t)) !== null) {
+    lastCode = m[2] ?? null;
+  }
+  if (lastCode) {
+    return lastCode.toUpperCase();
+  }
+
+  const glued = new RegExp(`([\\d.,]+)(${codes})\\b`, 'gi');
+  const mGlue = glued.exec(t);
+  if (mGlue?.[2]) {
+    return mGlue[2].toUpperCase();
+  }
+
+  const fallback = CURRENCY_FINDER.exec(t)?.[1];
+  return fallback ? fallback.toUpperCase() : null;
+}
+
 export const CSV_COLUMN_ALIASES = {
   description: [
     'description',
+    'desc',
     'line_description',
     'item',
     'product',
@@ -326,6 +373,7 @@ export const CSV_COLUMN_ALIASES = {
   lineTotal: [
     'line_total',
     'total_line',
+    'total',
     'amount',
     'betrag',
     'montant',
@@ -419,10 +467,11 @@ export function extractMoneyAfterLabels(text: string): {
   tax: string | null;
   total: string | null;
 } {
-  const sub = I18N_REGEX.subtotalLine.exec(text)?.[1] ?? null;
-  const tax = I18N_REGEX.taxLine.exec(text)?.[1] ?? null;
-  const tot = I18N_REGEX.totalLine.exec(text)?.[1] ?? null;
-  return { subtotal: sub, tax, total: tot };
+  return {
+    subtotal: lastCaptureGroup(I18N_REGEX.subtotalLine, text, 1),
+    tax: lastCaptureGroup(I18N_REGEX.taxLine, text, 1),
+    total: lastCaptureGroup(I18N_REGEX.totalLine, text, 1),
+  };
 }
 
 export function extractIssueDateLoose(text: string): string | null {
@@ -433,6 +482,5 @@ export function extractDueDateLoose(text: string): string | null {
   return I18N_REGEX.dueDateLine.exec(text)?.[1]?.trim() ?? null;
 }
 
-/** Skip table/summary lines when scanning loose PDF rows (multilingual) */
 export const LOOSE_ROW_SKIP =
   /^(invoice|facture|rechnung|faktura|fattura|supplier|fournisseur|lieferant|number|broj|datum|date|subtotal|sous|zwischen|tax|tva|vat|mwst|total|totale|gesamt|description|qty|quantity|menge|quantité|cantidad|prezzo|price|prix|betrag)/i;
