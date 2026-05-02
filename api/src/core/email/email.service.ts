@@ -10,13 +10,14 @@ const sendgrid = require('@sendgrid/mail') as {
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private readonly senderEmail: string;
-  private readonly appBaseUrl: string;
+  private readonly frontendBaseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('SENDGRID_API_KEY') ?? '';
     this.senderEmail =
       this.configService.get<string>('SENDGRID_FROM_EMAIL') ?? 'no-reply@mastery.local';
-    this.appBaseUrl = this.configService.get<string>('APP_BASE_URL') ?? 'http://localhost:3000';
+    this.frontendBaseUrl =
+      this.configService.get<string>('FRONTEND_BASE_URL') ?? 'http://localhost:4200';
 
     if (apiKey) {
       sendgrid.setApiKey(apiKey);
@@ -24,13 +25,13 @@ export class EmailService {
   }
 
   async sendRegistrationConfirmation(email: string, token: string): Promise<void> {
-    const verifyUrl = `${this.appBaseUrl}/auth/verify-email?token=${encodeURIComponent(token)}`;
+    const verifyUrl = `${this.frontendBaseUrl}/verify-email?token=${encodeURIComponent(token)}`;
     this.logger.log(`registration email requested for ${this.maskEmail(email)}`);
     await this.sendEmail(email, 'Welcome to Mastery', `Your registration is successful.\nVerify email: ${verifyUrl}`);
   }
 
   async sendPasswordReset(email: string, token: string): Promise<void> {
-    const resetUrl = `${this.appBaseUrl}/auth/reset-password?token=${encodeURIComponent(token)}`;
+    const resetUrl = `${this.frontendBaseUrl}/reset-password?token=${encodeURIComponent(token)}`;
     this.logger.log(`password reset email requested for ${this.maskEmail(email)}`);
     await this.sendEmail(email, 'Reset your password', `Reset password link: ${resetUrl}`);
   }

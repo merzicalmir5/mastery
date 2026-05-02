@@ -139,8 +139,12 @@ export class DocumentsService {
     });
 
     const originalName = path.basename(file.originalname);
+    let created: Document & {
+      lineItems: DocumentLineItem[];
+      validationIssues: DocumentValidationIssue[];
+    };
     try {
-      await this.prisma.document.create({
+      created = await this.prisma.document.create({
         data: {
           id,
           companyName: user.companyName,
@@ -151,12 +155,26 @@ export class DocumentsService {
           uploadedByUserId: user.sub,
           status: DocumentStatus.UPLOADED,
         },
+        include: {
+          lineItems: { orderBy: { itemOrder: 'asc' } },
+          validationIssues: { orderBy: { createdAt: 'asc' } },
+        },
       });
     } catch (error) {
       await fs.unlink(absolutePath).catch(() => undefined);
       throw error;
     }
 
+    void this.finishUploadedDocumentProcessing(id, absolutePath, sourceType);
+
+    return this.toApiRow(created);
+  }
+
+  private async finishUploadedDocumentProcessing(
+    id: string,
+    absolutePath: string,
+    sourceType: DocumentSourceType,
+  ): Promise<void> {
     try {
       await this.processDocument(id, absolutePath, sourceType);
     } catch (error) {
@@ -174,7 +192,6 @@ export class DocumentsService {
         },
       });
     }
-    return this.findOne(id, user);
   }
 
   async findAllForUser(

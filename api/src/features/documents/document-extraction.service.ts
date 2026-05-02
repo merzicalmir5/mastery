@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DocumentSourceType, DocumentType } from '@prisma/client';
 import * as fs from 'fs/promises';
 import {
-  CURRENCY_FINDER,
+  extractCurrencyLoose,
   CSV_COLUMN_ALIASES,
   LOOSE_ROW_SKIP,
   META_ALIASES,
@@ -15,6 +15,7 @@ import {
   extractSupplierLoose,
   pickMeta,
 } from './document-i18n';
+import { OCR_INITIAL_LANGS, detectTesseractRefinementLang } from './ocr-language';
 
 export type ExtractedLineItem = {
   description: string;
@@ -122,9 +123,31 @@ export class DocumentExtractionService {
         langs?: string,
       ) => Promise<{ data: { text: string; confidence?: number } }>;
     };
-    const result = await recognize(buffer, 'eng');
-    const text = result?.data?.text ?? '';
-    const confidence = result?.data?.confidence ?? null;
+
+    const initial = await recognize(buffer, OCR_INITIAL_LANGS);
+    let text = initial?.data?.text ?? '';
+    let confidence = initial?.data?.confidence ?? null;
+
+    const refinedLang = detectTesseractRefinementLang(text);
+    let refinedApplied = false;
+
+    if (refinedLang) {
+      try {
+        const refined = await recognize(buffer, refinedLang);
+        const t2 = refined?.data?.text ?? '';
+        const c2 = refined?.data?.confidence ?? null;
+        const len1 = text.trim().length;
+        const len2 = t2.trim().length;
+        const longEnough = len2 >= 10;
+        const notMuchWorse = len1 === 0 || len2 >= len1 * 0.4 || len2 > len1;
+        if (longEnough && notMuchWorse) {
+          text = t2;
+          confidence = c2 ?? confidence;
+          refinedApplied = true;
+        }
+      } catch {}
+    }
+
     const parsed = this.parseTextContent(text);
     console.log('[documents.parseImage] text preview', text.slice(0, 2000));
     return {
@@ -133,9 +156,14 @@ export class DocumentExtractionService {
         ...(parsed.rawExtractedData ?? {}),
         source: 'image',
         confidence,
+        ocrInitialLangs: OCR_INITIAL_LANGS,
+        ocrRefinedLang: refinedLang ?? undefined,
+        ocrRefinedApplied: refinedApplied,
       },
       ingestionNotes: text.trim()
-        ? 'OCR extracted text from image. Please review recognized values.'
+        ? refinedApplied
+          ? `OCR (${refinedLang}) refined after language detection. Please review recognized values.`
+          : 'OCR extracted text from image. Please review recognized values.'
         : 'OCR did not detect enough text. Please review and enter data manually.',
     };
   }
@@ -162,14 +190,46 @@ export class DocumentExtractionService {
       return undefined;
     };
 
-    const hasStructuredHeader =
+    const pickFooterMoney = (aliases: string[]): string | undefined => {
+      const i = this.findCsvColumnAny(header, aliases);
+      if (i < 0) {
+        return undefined;
+      }
+      if (rows.length > 3) {
+        for (let r = rows.length - 1; r >= 2; r--) {
+          const v = rows[r]?.[i]?.trim();
+          if (v && /\d/.test(v)) {
+            return v;
+          }
+        }
+      }
+      return rows[1]?.[i]?.trim();
+    };
+
+    const hasMetaHeader =
       META_ALIASES.supplier.some((a) => this.findCsvColumnAny(header, [a]) >= 0) ||
       META_ALIASES.documentNumber.some((a) => this.findCsvColumnAny(header, [a]) >= 0) ||
       header.includes('supplier_name') ||
       header.includes('document_number') ||
       header.includes('invoice_number');
 
-    if (hasStructuredHeader) {
+    const dIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.description);
+    const qIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.quantity);
+    const uIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.unitPrice);
+    const ltIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.lineTotal);
+    const hasLineColumns = dIdx >= 0 && qIdx >= 0 && uIdx >= 0;
+
+    /** Column-mapped rows plus heuristic rows (same start row as structured data); deduped. */
+    const mergeStructuredAndLooseRows = (
+      structured: ExtractedLineItem[],
+      looseStartRow: number,
+    ): ExtractedLineItem[] =>
+      this.dedupeLineItems([
+        ...structured,
+        ...this.extractLooseCsvLineItems(rows, looseStartRow),
+      ]);
+
+    if (hasMetaHeader) {
       if (rows.length > 1) {
         meta.supplier_name = pick(META_ALIASES.supplier) ?? pick(['supplier_name', 'supplier']) ?? '';
         meta.document_number =
@@ -179,44 +239,37 @@ export class DocumentExtractionService {
         meta.currency = pick(META_ALIASES.currency) ?? pick(['currency']) ?? '';
         meta.issue_date = pick(META_ALIASES.issueDate) ?? pick(['issue_date', 'issued']) ?? '';
         meta.due_date = pick(META_ALIASES.dueDate) ?? pick(['due_date', 'due']) ?? '';
-        meta.subtotal = pick(META_ALIASES.subtotal) ?? pick(['subtotal', 'sub_total']) ?? '';
-        meta.tax = pick(META_ALIASES.tax) ?? pick(['tax', 'vat']) ?? '';
-        meta.total = pick(META_ALIASES.total) ?? pick(['total', 'amount', 'grand_total']) ?? '';
+        meta.subtotal =
+          pickFooterMoney(META_ALIASES.subtotal) ?? pick(['subtotal', 'sub_total']) ?? '';
+        meta.tax = pickFooterMoney(META_ALIASES.tax) ?? pick(['tax', 'vat']) ?? '';
+        meta.total =
+          pickFooterMoney(META_ALIASES.total) ?? pick(['total', 'amount', 'grand_total']) ?? '';
         const dt =
           pick(['document_type', 'type'])?.toLowerCase() ??
           (header.some((h) => h.includes('purchase') && h.includes('order')) ? 'purchase_order' : '');
         meta.document_type =
           dt.includes('purchase') || dt === 'po' ? 'purchase_order' : 'invoice';
 
-        const dIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.description);
-        const qIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.quantity);
-        const uIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.unitPrice);
-        const ltIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.lineTotal);
-
-        const lineItems: ExtractedLineItem[] = [];
-        if (dIdx >= 0 && rows.length > 2) {
-          for (let r = 2; r < rows.length; r++) {
-            const row = rows[r];
-            const description = row[dIdx]?.trim() ?? '';
-            if (!description) {
-              continue;
-            }
-            const quantity = Number(row[qIdx]?.replace(',', '.') ?? 0) || 0;
-            const unitPrice = Number(row[uIdx]?.replace(',', '.') ?? 0) || 0;
-            const lineTotal = Number(
-              ltIdx >= 0 ? row[ltIdx]?.replace(',', '.') : quantity * unitPrice,
-            );
-            lineItems.push({
-              description,
-              quantity,
-              unitPrice,
-              lineTotal: Number.isFinite(lineTotal) ? lineTotal : quantity * unitPrice,
-            });
-          }
-        }
+        const structured =
+          hasLineColumns && rows.length > 2
+            ? this.extractCsvLineItems(rows, dIdx, qIdx, uIdx, ltIdx, 2)
+            : [];
+        const lineItems =
+          rows.length > 2 ? mergeStructuredAndLooseRows(structured, 2) : structured;
 
         return this.buildFromMetaRecord(meta, lineItems);
       }
+    }
+
+    if (hasLineColumns && rows.length > 1) {
+      const structured = this.extractCsvLineItems(rows, dIdx, qIdx, uIdx, ltIdx, 1);
+      const lineItems = mergeStructuredAndLooseRows(structured, 1);
+      return this.buildFromMetaRecord(meta, lineItems);
+    }
+
+    const looseOnly = this.extractLooseCsvLineItems(rows, 0);
+    if (looseOnly.length > 0) {
+      return this.buildFromMetaRecord(meta, looseOnly);
     }
 
     const kv: Record<string, string> = {};
@@ -230,10 +283,110 @@ export class DocumentExtractionService {
       }
     }
     if (Object.keys(kv).length > 0) {
-      return this.buildFromMetaRecord(kv, []);
+      const looseFromKv = this.extractLooseCsvLineItems(rows, 0);
+      return this.buildFromMetaRecord(kv, looseFromKv);
     }
 
     return {};
+  }
+
+  private dedupeLineItems(items: ExtractedLineItem[]): ExtractedLineItem[] {
+    const seen = new Set<string>();
+    const out: ExtractedLineItem[] = [];
+    for (const li of items) {
+      const key = `${li.description}\t${li.quantity}\t${li.unitPrice}\t${li.lineTotal}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      out.push(li);
+    }
+    return out;
+  }
+
+  private extractCsvLineItems(
+    rows: string[][],
+    dIdx: number,
+    qIdx: number,
+    uIdx: number,
+    ltIdx: number,
+    startRow: number,
+  ): ExtractedLineItem[] {
+    const lineItems: ExtractedLineItem[] = [];
+    if (dIdx < 0 || qIdx < 0 || uIdx < 0 || startRow >= rows.length) {
+      return lineItems;
+    }
+    for (let r = startRow; r < rows.length; r++) {
+      const row = rows[r];
+      const description = row[dIdx]?.trim() ?? '';
+      if (!description) {
+        continue;
+      }
+      const quantity = Number(row[qIdx]?.replace(',', '.') ?? 0) || 0;
+      const unitPrice = Number(row[uIdx]?.replace(',', '.') ?? 0) || 0;
+      const lineTotal = Number(
+        ltIdx >= 0 ? row[ltIdx]?.replace(',', '.') : quantity * unitPrice,
+      );
+      lineItems.push({
+        description,
+        quantity,
+        unitPrice,
+        lineTotal: Number.isFinite(lineTotal) ? lineTotal : quantity * unitPrice,
+      });
+    }
+    return lineItems;
+  }
+
+  /**
+   * Rows whose last 2–3 cells parse as numbers → quantity, unit price, optional line total;
+   * leading cells form the description (invoice-style lines without a typed header row).
+   */
+  private extractLooseCsvLineItems(rows: string[][], startRow: number): ExtractedLineItem[] {
+    const out: ExtractedLineItem[] = [];
+    for (let r = startRow; r < rows.length; r++) {
+      const row = rows[r];
+      const li = this.tryParseLooseCsvLineRow(row);
+      if (li) {
+        out.push(li);
+      }
+    }
+    return out;
+  }
+
+  private tryParseLooseCsvLineRow(cells: string[]): ExtractedLineItem | null {
+    if (!cells?.length || cells.length < 3) {
+      return null;
+    }
+    const trimmed = cells.map((c) => c.trim());
+    for (const want of [3, 2] as const) {
+      if (trimmed.length <= want) {
+        continue;
+      }
+      const suffix = trimmed.slice(-want);
+      const nums = suffix.map((s) => this.parseMoneyToken(s));
+      if (!nums.every((n) => n !== null && Number.isFinite(n))) {
+        continue;
+      }
+      const quantity = nums[0]!;
+      const unitPrice = nums[1]!;
+      const lineTotal = want === 3 ? nums[2]! : quantity * unitPrice;
+      const descParts = trimmed.slice(0, trimmed.length - want).filter(Boolean);
+      const description = descParts.join(', ').trim();
+      if (description.length < 2) {
+        continue;
+      }
+      if (LOOSE_ROW_SKIP.test(description)) {
+        return null;
+      }
+      const lt = Number.isFinite(lineTotal) ? lineTotal : quantity * unitPrice;
+      return {
+        description,
+        quantity,
+        unitPrice,
+        lineTotal: lt,
+      };
+    }
+    return null;
   }
 
   private buildFromMetaRecord(
@@ -329,7 +482,7 @@ export class DocumentExtractionService {
       this.parseNum(pickMeta(meta, META_ALIASES.total)) ??
       this.parseNum(meta.grand_total) ??
       this.parseMoney(money.total) ??
-      this.parseMoney(/(?:grand\s*)?total\s*[:.]?\s*([\d.,]+)/i.exec(t)?.[1]);
+      this.parseGrandTotalLoose(t);
     const sub =
       this.parseNum(pickMeta(meta, META_ALIASES.subtotal)) ??
       this.parseMoney(money.subtotal) ??
@@ -343,10 +496,9 @@ export class DocumentExtractionService {
       pickMeta(meta, META_ALIASES.issueDate) || meta.date || meta.issued || extractIssueDateLoose(t);
     const dueRaw = pickMeta(meta, META_ALIASES.dueDate) || meta.due || extractDueDateLoose(t);
 
-    const lineItems = this.parseLoosePdfLineRows(t);
+    const lineItems = this.extractAllLooseLineItemsFromText(t);
 
-    const cur =
-      pickMeta(meta, META_ALIASES.currency) || CURRENCY_FINDER.exec(t)?.[1] || '';
+    const cur = pickMeta(meta, META_ALIASES.currency) || extractCurrencyLoose(t) || '';
 
     console.log('[documents.parseTextContent] parsed fields', {
       documentType: docNum ? documentType : null,
@@ -378,7 +530,17 @@ export class DocumentExtractionService {
     };
   }
 
-  /** Heuristic: lines with description + 3 trailing numbers (qty, unit, line total), skipping header/summary labels. */
+  /**
+   * Used by PDF, TXT, images (OCR): whitespace-separated lines, comma/tab/semicolon rows — merged and deduped.
+   */
+  private extractAllLooseLineItemsFromText(t: string): ExtractedLineItem[] {
+    return this.dedupeLineItems([
+      ...this.parseLoosePdfLineRows(t),
+      ...this.parseLooseCommaSeparatedLineRows(t),
+      ...this.parseLooseTabSemicolonLineRows(t),
+    ]);
+  }
+
   private parseLoosePdfLineRows(t: string): ExtractedLineItem[] {
     const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const out: ExtractedLineItem[] = [];
@@ -405,11 +567,99 @@ export class DocumentExtractionService {
     return out;
   }
 
+  /** Comma-separated quantity/price/total tails (pasted CSV, export). */
+  private parseLooseCommaSeparatedLineRows(t: string): ExtractedLineItem[] {
+    const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const out: ExtractedLineItem[] = [];
+    for (const line of lines) {
+      if (!line.includes(',') || LOOSE_ROW_SKIP.test(line)) {
+        continue;
+      }
+      const li = this.tryParseLooseCsvLineRow(this.splitCsvLine(line));
+      if (li) {
+        out.push(li);
+      }
+    }
+    return out;
+  }
+
+  /** Tab- or semicolon-separated lines (Excel paste, EU CSV in text/PDF). */
+  private parseLooseTabSemicolonLineRows(t: string): ExtractedLineItem[] {
+    const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const out: ExtractedLineItem[] = [];
+    for (const line of lines) {
+      if (LOOSE_ROW_SKIP.test(line)) {
+        continue;
+      }
+      let cells: string[] | null = null;
+      if (line.includes('\t')) {
+        cells = line.split('\t').map((c) => c.trim());
+      } else if (line.includes(';')) {
+        cells = line.split(';').map((c) => c.trim());
+      }
+      if (cells && cells.length >= 3) {
+        const li = this.tryParseLooseCsvLineRow(cells);
+        if (li) {
+          out.push(li);
+        }
+      }
+    }
+    return out;
+  }
+
   private parseMoney(s: string | null | undefined): number | null {
     if (s == null || s === '') {
       return null;
     }
-    return this.parseNum(s.replace(/[^\d.,\-]/g, '').replace(',', '.'));
+    const raw = String(s).trim();
+    for (const token of raw.split(/\s+/)) {
+      const n = this.parseMoneyToken(token);
+      if (n !== null) {
+        return n;
+      }
+    }
+    return this.parseMoneyToken(raw.replace(/\s+/g, ''));
+  }
+
+  private parseMoneyToken(token: string): number | null {
+    const t = token.replace(/[^\d.,\-+]/g, '');
+    if (!t || t === '+' || t === '-') {
+      return null;
+    }
+    let d = t;
+    const lastComma = d.lastIndexOf(',');
+    const lastDot = d.lastIndexOf('.');
+    if (lastComma >= 0 && lastDot >= 0) {
+      if (lastComma > lastDot) {
+        d = d.replace(/\./g, '').replace(',', '.');
+      } else {
+        d = d.replace(/,/g, '');
+      }
+    } else if (lastComma >= 0) {
+      const after = d.slice(lastComma + 1);
+      if (after.length <= 2 && /^\d+$/.test(after)) {
+        d = d.replace(',', '.');
+      } else {
+        d = d.replace(/,/g, '');
+      }
+    } else if (lastDot >= 0) {
+      const after = d.slice(lastDot + 1);
+      if (after.length === 3 && /^\d{3}$/.test(after)) {
+        d = d.replace(/\./g, '');
+      }
+    }
+    const n = Number(d);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  private parseGrandTotalLoose(text: string): number | null {
+    const re = /(?:grand\s*)?total\s*[:.]?\s*(?:€|£|\$|EUR|USD|GBP|CHF)?\s*([\-+]?\d[\d.,]*)/gi;
+    let m: RegExpExecArray | null;
+    let last: string | null = null;
+    while ((m = re.exec(text)) !== null) {
+      last = m[1] ?? null;
+    }
+    return last ? this.parseMoney(last) : null;
   }
 
   private parseNum(s: string | undefined): number | null {
@@ -428,7 +678,6 @@ export class DocumentExtractionService {
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
-  /** Match CSV header cell to known column aliases (exact / contains). */
   private findCsvColumnIndex(header: string[], alias: string): number {
     const k = alias.toLowerCase().trim();
     for (let i = 0; i < header.length; i++) {

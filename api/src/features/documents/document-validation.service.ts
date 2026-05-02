@@ -49,6 +49,14 @@ export class DocumentValidationService {
   }
 
   private checkMissingFields(doc: DocWithLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
+    if (doc.documentType == null) {
+      issues.push({
+        fieldPath: 'documentType',
+        code: 'MISSING_FIELD',
+        message: 'Document type (invoice or purchase order) is missing.',
+        severity: 'WARNING',
+      });
+    }
     if (!doc.supplierName?.trim()) {
       issues.push({
         fieldPath: 'supplierName',
@@ -65,11 +73,51 @@ export class DocumentValidationService {
         severity: 'ERROR',
       });
     }
+    if (!doc.issueDate) {
+      issues.push({
+        fieldPath: 'issueDate',
+        code: 'MISSING_FIELD',
+        message: 'Issue date is missing.',
+        severity: 'WARNING',
+      });
+    }
+    if (!doc.dueDate) {
+      issues.push({
+        fieldPath: 'dueDate',
+        code: 'MISSING_FIELD',
+        message: 'Due date is missing.',
+        severity: 'WARNING',
+      });
+    }
     if (!doc.currency?.trim()) {
       issues.push({
         fieldPath: 'currency',
         code: 'MISSING_FIELD',
         message: 'Currency is missing.',
+        severity: 'WARNING',
+      });
+    }
+    if (doc.subtotal == null) {
+      issues.push({
+        fieldPath: 'subtotal',
+        code: 'MISSING_FIELD',
+        message: 'Subtotal is missing.',
+        severity: 'WARNING',
+      });
+    }
+    if (doc.tax == null) {
+      issues.push({
+        fieldPath: 'tax',
+        code: 'MISSING_FIELD',
+        message: 'Tax is missing.',
+        severity: 'WARNING',
+      });
+    }
+    if (doc.total == null) {
+      issues.push({
+        fieldPath: 'total',
+        code: 'MISSING_FIELD',
+        message: 'Total is missing.',
         severity: 'WARNING',
       });
     }
