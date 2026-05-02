@@ -6,6 +6,12 @@ import { PrismaService } from './core/prisma/prisma.service';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  console.log(
+    '[bootstrap] starting PORT_env=%s NODE_ENV=%s',
+    process.env.PORT ?? '(unset)',
+    process.env.NODE_ENV ?? '(unset)',
+  );
+
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(new FileLogger('NestApplication'));
   app.enableCors({
@@ -19,27 +25,6 @@ async function bootstrap() {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Mastery API')
-    .setDescription('Smart Document Processing API documentation')
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'Access token from POST /auth/login (paste without "Bearer " prefix).',
-      },
-      'access-token',
-    )
-    .build();
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  swaggerDocument.security = [{ 'access-token': [] }];
-  SwaggerModule.setup('api/docs', app, swaggerDocument);
-  app.getHttpAdapter().get('/', (_req, res) => {
-    res.redirect('/api/docs');
-  });
-
   const prismaService = app.get(PrismaService);
   await prismaService.enableShutdownHooks(app);
 
@@ -49,6 +34,33 @@ async function bootstrap() {
   console.log(
     `[bootstrap] listening on 0.0.0.0:${listenPort} (process.env.PORT=${JSON.stringify(process.env.PORT)})`,
   );
+
+  try {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Mastery API')
+      .setDescription('Smart Document Processing API documentation')
+      .setVersion('1.0')
+      .addBearerAuth(
+        {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description:
+            'Access token from POST /auth/login (paste without "Bearer " prefix).',
+        },
+        'access-token',
+      )
+      .build();
+    const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+    swaggerDocument.security = [{ 'access-token': [] }];
+    SwaggerModule.setup('api/docs', app, swaggerDocument);
+    app.getHttpAdapter().get('/', (_req, res) => {
+      res.redirect('/api/docs');
+    });
+    console.log('[bootstrap] Swagger mounted at /api/docs');
+  } catch (err: unknown) {
+    console.error('[bootstrap] Swagger setup failed (HTTP API still up)', err);
+  }
 }
 
 bootstrap().catch((err: unknown) => {
