@@ -26,8 +26,24 @@ async function bootstrap() {
 
   const docsPath = 'docs';
 
-  app.getHttpAdapter().get('/', (_req, res) => {
-    res.redirect(`/${docsPath}`);
+  const httpServer = app.getHttpAdapter().getInstance();
+  if (typeof httpServer?.set === 'function') {
+    httpServer.set('trust proxy', 1);
+  }
+
+  app.getHttpAdapter().get('/', (req, res) => {
+    const accept =
+      typeof req.headers.accept === 'string' ? req.headers.accept : '';
+    if (accept.includes('text/html')) {
+      res.redirect(`/${docsPath}`);
+      return;
+    }
+    res.status(200).json({
+      ok: true,
+      service: 'mastery-api',
+      docs: `/${docsPath}`,
+      health: '/health',
+    });
   });
   app.getHttpAdapter().get('/api/docs', (_req, res) => {
     res.redirect(`/${docsPath}`);
