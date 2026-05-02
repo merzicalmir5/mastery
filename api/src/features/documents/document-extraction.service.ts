@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { DocumentSourceType, DocumentType } from '@prisma/client';
 import * as fs from 'fs/promises';
 import {
+  captureLooksLikeDate,
+  extractAnyNumericDateLoose,
   extractCurrencyLoose,
+  extractInvoiceFooterAmountsLoose,
   CSV_COLUMN_ALIASES,
   LOOSE_ROW_SKIP,
   META_ALIASES,
@@ -16,6 +19,7 @@ import {
   pickMeta,
 } from './document-i18n';
 import { OCR_INITIAL_LANGS, detectTesseractRefinementLang } from './ocr-language';
+import { preprocessImageForOcr } from './ocr-preprocess';
 
 export type ExtractedLineItem = {
   description: string;
@@ -38,6 +42,8 @@ export type ExtractionResult = {
   rawExtractedData: Record<string, unknown>;
   ingestionNotes: string | null;
 };
+
+const LINE_ITEM_EPS = 0.02;
 
 @Injectable()
 export class DocumentExtractionService {
@@ -111,36 +117,128 @@ export class DocumentExtractionService {
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
     const { text } = await parser.getText();
     await parser.destroy();
-    console.log('[documents.parsePdf] text preview', text.slice(0, 2000));
     return this.parseTextContent(text);
   }
 
-  private async parseImage(buffer: Buffer): Promise<Partial<ExtractionResult>> {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { recognize } = require('tesseract.js') as {
-      recognize: (
-        image: Buffer,
-        langs?: string,
-      ) => Promise<{ data: { text: string; confidence?: number } }>;
-    };
+  private readonly OCR_LINE_ITEMS_STOP_AT = 4;
 
-    const initial = await recognize(buffer, OCR_INITIAL_LANGS);
-    let text = initial?.data?.text ?? '';
-    let confidence = initial?.data?.confidence ?? null;
+  /** Debug: šta tesseract.js zapravo vrati iz worker.recognize (bez ogromnih polja tipa hocr/pdf). */
+  private logTesseractRecognizeSnapshot(
+    label: string,
+    res: { jobId?: string; data?: Record<string, unknown> },
+  ): void {
+    const d = res?.data;
+    if (!d) {
+      console.log('[documents.ocr] recognize result', label, '(no data)');
+      return;
+    }
+    const text = typeof d['text'] === 'string' ? d['text'] : '';
+    const blocks = d['blocks'];
+    const blockSumm =
+      Array.isArray(blocks) && blocks.length
+        ? (blocks as { text?: string; confidence?: number }[])
+            .slice(0, 12)
+            .map((b, i) => ({
+              i,
+              confidence: b.confidence,
+              textPreview: (b.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 180),
+            }))
+        : [];
+    console.log('[documents.ocr] recognize result', label, {
+      jobId: res.jobId,
+      version: d['version'],
+      oem: d['oem'],
+      psm: d['psm'],
+      confidence: d['confidence'],
+      textLength: text.length,
+      textPreview: text.slice(0, 3500),
+      blockCount: Array.isArray(blocks) ? blocks.length : 0,
+      blocksPreview: blockSumm,
+      hasTsv: typeof d['tsv'] === 'string' && (d['tsv'] as string).length > 0,
+      hasHocr: typeof d['hocr'] === 'string' && (d['hocr'] as string).length > 0,
+      rotateRadians: d['rotateRadians'],
+    });
+  }
+
+  private async extractFromImageWithAdaptivePsm(
+    image: Buffer,
+    langs: string,
+  ): Promise<{
+    merged: Partial<ExtractionResult>;
+    previewText: string;
+    confidence: number | null;
+    psmsUsed: string[];
+  }> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Tesseract = require('tesseract.js') as typeof import('tesseract.js');
+    const worker = await Tesseract.createWorker(langs, Tesseract.OEM.LSTM_ONLY, {});
+    const psms = [
+      Tesseract.PSM.AUTO,
+      Tesseract.PSM.SINGLE_COLUMN,
+      Tesseract.PSM.SPARSE_TEXT,
+      Tesseract.PSM.SINGLE_BLOCK,
+    ] as const;
+    let merged: Partial<ExtractionResult> = {};
+    let previewText = '';
+    let confidence: number | null = null;
+    const psmsUsed: string[] = [];
+    try {
+      for (const psm of psms) {
+        await worker.setParameters({
+          tessedit_pageseg_mode: psm,
+          preserve_interword_spaces: '1',
+        });
+        const res = await worker.recognize(image);
+        this.logTesseractRecognizeSnapshot(`langs=${langs} psm=${String(psm)}`, {
+          jobId: res.jobId,
+          data: res.data as unknown as Record<string, unknown>,
+        });
+        const t = res?.data?.text ?? '';
+        if (!previewText && t.trim()) {
+          previewText = t;
+        }
+        if (confidence === null && res?.data?.confidence != null) {
+          confidence = res.data.confidence;
+        }
+        const next = this.parseTextContent(t);
+        merged =
+          Object.keys(merged).length === 0
+            ? next
+            : this.mergePartialExtraction(merged, next);
+        psmsUsed.push(String(psm));
+        if ((merged.lineItems?.length ?? 0) >= this.OCR_LINE_ITEMS_STOP_AT) {
+          break;
+        }
+      }
+      return { merged, previewText, confidence, psmsUsed };
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  private async parseImage(buffer: Buffer): Promise<Partial<ExtractionResult>> {
+    const { buffer: ocrBuffer, applied: preprocessApplied, error: preprocessError } =
+      await preprocessImageForOcr(buffer);
+
+    const initial = await this.extractFromImageWithAdaptivePsm(ocrBuffer, OCR_INITIAL_LANGS);
+    let text = initial.previewText;
+    let confidence = initial.confidence;
+    let parsed = initial.merged;
 
     const refinedLang = detectTesseractRefinementLang(text);
     let refinedApplied = false;
 
     if (refinedLang) {
       try {
-        const refined = await recognize(buffer, refinedLang);
-        const t2 = refined?.data?.text ?? '';
-        const c2 = refined?.data?.confidence ?? null;
+        const refined = await this.extractFromImageWithAdaptivePsm(ocrBuffer, refinedLang);
+        const t2 = refined.previewText;
+        const c2 = refined.confidence;
         const len1 = text.trim().length;
         const len2 = t2.trim().length;
         const longEnough = len2 >= 10;
         const notMuchWorse = len1 === 0 || len2 >= len1 * 0.4 || len2 > len1;
         if (longEnough && notMuchWorse) {
+          parsed = this.mergePartialExtraction(parsed, refined.merged);
           text = t2;
           confidence = c2 ?? confidence;
           refinedApplied = true;
@@ -148,23 +246,106 @@ export class DocumentExtractionService {
       } catch {}
     }
 
-    const parsed = this.parseTextContent(text);
-    console.log('[documents.parseImage] text preview', text.slice(0, 2000));
+    let englishFallbackApplied = false;
+    let englishTextPreview: string | undefined;
+    if (this.shouldRunEnglishOcrFallback(text, parsed)) {
+      try {
+        const eng = await this.extractFromImageWithAdaptivePsm(ocrBuffer, 'eng');
+        const engText = eng.previewText;
+        if (engText.replace(/\s+/g, ' ').trim().length >= 25) {
+          parsed = this.mergePartialExtraction(parsed, eng.merged);
+          englishFallbackApplied = true;
+          englishTextPreview = engText.slice(0, 1500);
+        }
+      } catch {}
+    }
+
+    const parsedLineItemRows = parsed.lineItems?.length ?? 0;
+    console.log('[documents.parseImage] parsed table / line-item rows from OCR text', {
+      lineItemRows: parsedLineItemRows,
+    });
+
     return {
       ...parsed,
       rawExtractedData: {
         ...(parsed.rawExtractedData ?? {}),
         source: 'image',
         confidence,
+        ocrImagePreprocessed: preprocessApplied,
+        ocrPreprocessError: preprocessError,
         ocrInitialLangs: OCR_INITIAL_LANGS,
+        ocrPsmAdaptive: initial.psmsUsed.join(','),
         ocrRefinedLang: refinedLang ?? undefined,
         ocrRefinedApplied: refinedApplied,
+        ocrEnglishFallbackApplied: englishFallbackApplied,
+        ocrEnglishFallbackPreview: englishTextPreview,
       },
       ingestionNotes: text.trim()
         ? refinedApplied
           ? `OCR (${refinedLang}) refined after language detection. Please review recognized values.`
           : 'OCR extracted text from image. Please review recognized values.'
         : 'OCR did not detect enough text. Please review and enter data manually.',
+    };
+  }
+
+  private shouldRunEnglishOcrFallback(
+    ocrText: string,
+    parsed: Partial<ExtractionResult>,
+  ): boolean {
+    const compact = ocrText.replace(/\s+/g, ' ').trim();
+    if (compact.length < 40) {
+      return true;
+    }
+    const noTotals = parsed.total == null && parsed.subtotal == null;
+    const noLines = !parsed.lineItems?.length;
+    const weakMeta =
+      parsed.currency == null ||
+      parsed.issueDate == null ||
+      parsed.total == null ||
+      parsed.subtotal == null;
+    return (noTotals && noLines) || (noLines && weakMeta);
+  }
+
+  private pickRicherLineItems(a: ExtractedLineItem[], b: ExtractedLineItem[]): ExtractedLineItem[] {
+    if (b.length > a.length) {
+      return b;
+    }
+    if (a.length > b.length) {
+      return a;
+    }
+    const score = (xs: ExtractedLineItem[]) =>
+      xs.reduce((s, li) => s + li.description.replace(/\s+/g, '').length, 0);
+    return score(b) >= score(a) ? b : a;
+  }
+
+  private mergePartialExtraction(
+    primary: Partial<ExtractionResult>,
+    secondary: Partial<ExtractionResult>,
+  ): Partial<ExtractionResult> {
+    const pLines = primary.lineItems ?? [];
+    const sLines = secondary.lineItems ?? [];
+    const pickLines = this.pickRicherLineItems(pLines, sLines);
+
+    return {
+      ...primary,
+      documentType: primary.documentType ?? secondary.documentType,
+      supplierName: primary.supplierName ?? secondary.supplierName,
+      documentNumber: primary.documentNumber ?? secondary.documentNumber,
+      issueDate: primary.issueDate ?? secondary.issueDate,
+      dueDate: primary.dueDate ?? secondary.dueDate,
+      currency: primary.currency ?? secondary.currency,
+      subtotal: primary.subtotal ?? secondary.subtotal,
+      tax: primary.tax ?? secondary.tax,
+      total: primary.total ?? secondary.total,
+      lineItems: pickLines ?? [],
+      rawExtractedData: {
+        ...(typeof primary.rawExtractedData === 'object' && primary.rawExtractedData
+          ? primary.rawExtractedData
+          : {}),
+        ...(typeof secondary.rawExtractedData === 'object' && secondary.rawExtractedData
+          ? secondary.rawExtractedData
+          : {}),
+      },
     };
   }
 
@@ -237,7 +418,10 @@ export class DocumentExtractionService {
           '';
         meta.currency = pick(META_ALIASES.currency) ?? pick(['currency']) ?? '';
         meta.issue_date = pick(META_ALIASES.issueDate) ?? pick(['issue_date', 'issued']) ?? '';
-        meta.due_date = pick(META_ALIASES.dueDate) ?? pick(['due_date', 'due']) ?? '';
+        meta.due_date =
+          pick(META_ALIASES.dueDate) ??
+          pick(['due_date', 'due', 'datum_valute', 'rok_placanja', 'datum_dospijeca']) ??
+          '';
         meta.subtotal =
           pickFooterMoney(META_ALIASES.subtotal) ?? pick(['subtotal', 'sub_total']) ?? '';
         meta.tax = pickFooterMoney(META_ALIASES.tax) ?? pick(['tax', 'vat']) ?? '';
@@ -362,23 +546,27 @@ export class DocumentExtractionService {
       if (!nums.every((n) => n !== null && Number.isFinite(n))) {
         continue;
       }
-      const quantity = nums[0]!;
-      const unitPrice = nums[1]!;
-      const lineTotal = want === 3 ? nums[2]! : quantity * unitPrice;
+      const a = nums[0]!;
+      const b = nums[1]!;
+      const lineTotal = want === 3 ? nums[2]! : a * b;
       const descParts = trimmed.slice(0, trimmed.length - want).filter(Boolean);
-      const description = descParts.join(', ').trim();
+      let description = descParts.join(', ').trim().replace(/^\d+\s+/, '');
       if (description.length < 2) {
         continue;
       }
       if (LOOSE_ROW_SKIP.test(description)) {
         return null;
       }
-      const lt = Number.isFinite(lineTotal) ? lineTotal : quantity * unitPrice;
+      const qp = this.inferQuantityAndUnitPrice(a, b, lineTotal);
+      if (!qp) {
+        continue;
+      }
+      const lt = want === 3 ? lineTotal : qp.quantity * qp.unitPrice;
       return {
         description,
-        quantity,
-        unitPrice,
-        lineTotal: lt,
+        quantity: qp.quantity,
+        unitPrice: qp.unitPrice,
+        lineTotal: Number.isFinite(lt) ? lt : qp.quantity * qp.unitPrice,
       };
     }
     return null;
@@ -422,6 +610,17 @@ export class DocumentExtractionService {
     while ((m = kvLine.exec(t)) !== null) {
       const k = m[1].trim().toLowerCase().replace(/\s+/g, '_');
       meta[k] = m[2].trim();
+    }
+
+    const issueDateNoColon =
+      /^\s*(?:invoice\s*date|issue\s*date|date)\s+(.+)$/gim;
+    while ((m = issueDateNoColon.exec(t)) !== null) {
+      const v = m[1].trim();
+      if (v && captureLooksLikeDate(v)) {
+        meta.issue_date = v;
+        meta.date = meta.date ?? v;
+        break;
+      }
     }
 
     const looseSupplier = extractSupplierLoose(t);
@@ -473,42 +672,63 @@ export class DocumentExtractionService {
     }
 
     const money = extractMoneyAfterLabels(t);
-    const total =
+    const footer = extractInvoiceFooterAmountsLoose(t);
+
+    let total =
       this.parseNum(pickMeta(meta, META_ALIASES.total)) ??
       this.parseNum(meta.grand_total) ??
       this.parseMoney(money.total) ??
       this.parseGrandTotalLoose(t);
-    const sub =
+    if (total == null) {
+      total = this.parseMoney(footer.total);
+    }
+
+    let sub =
       this.parseNum(pickMeta(meta, META_ALIASES.subtotal)) ??
       this.parseMoney(money.subtotal) ??
       this.parseMoney(/subtotal\s*[:.]?\s*([\d.,]+)/i.exec(t)?.[1]);
-    const tax =
+    if (sub == null) {
+      sub = this.parseMoney(footer.subtotal);
+    }
+
+    let tax =
       this.parseNum(pickMeta(meta, META_ALIASES.tax)) ??
       this.parseMoney(money.tax) ??
       this.parseMoney(/tax\s*(?:\([^)]*\))?\s*[:.]?\s*([\d.,]+)/i.exec(t)?.[1]);
+    if (tax == null) {
+      tax = this.parseMoney(footer.tax);
+    }
 
-    const issueRaw =
-      pickMeta(meta, META_ALIASES.issueDate) || meta.date || meta.issued || extractIssueDateLoose(t);
+    let issueRaw =
+      pickMeta(meta, META_ALIASES.issueDate) ||
+      meta.date ||
+      meta.issued ||
+      extractIssueDateLoose(t);
+    if (!issueRaw) {
+      issueRaw = extractAnyNumericDateLoose(t);
+    }
     const dueRaw = pickMeta(meta, META_ALIASES.dueDate) || meta.due || extractDueDateLoose(t);
 
-    const lineItems = this.extractAllLooseLineItemsFromText(t);
+    const tableStyleRows = this.extractLineItemsFromDescriptionColumnTable(t);
+    const regexTableRows = this.extractLineItemsFromRegexTableRows(t);
+    const scannedTriples = this.extractLineItemsByScanningMoneyTriples(t);
+    const looseCombined = this.dedupeLineItems([
+      ...this.extractAllLooseLineItemsFromText(t),
+      ...this.extractPermissiveMoneyLineItems(t),
+    ]);
+    let lineItems = this.mergeLineItemExtractionCandidates([
+      { items: tableStyleRows, preferOnTie: true },
+      { items: regexTableRows, preferOnTie: true },
+      { items: scannedTriples, preferOnTie: false },
+      { items: looseCombined, preferOnTie: false },
+    ]);
 
-    const cur = pickMeta(meta, META_ALIASES.currency) || extractCurrencyLoose(t) || '';
+    let cur = pickMeta(meta, META_ALIASES.currency) || extractCurrencyLoose(t) || '';
+    if (!cur && /\$/m.test(t)) {
+      cur = 'USD';
+    }
 
-    console.log('[documents.parseTextContent] parsed fields', {
-      documentType: docNum ? documentType : null,
-      supplierName:
-        pickMeta(meta, META_ALIASES.supplier) || meta.vendor || meta.from || looseSupplier || null,
-      documentNumber: docNum ?? null,
-      issueDateRaw: issueRaw,
-      dueDateRaw: dueRaw,
-      currency: cur ? cur.toUpperCase() : null,
-      subtotal: sub,
-      tax,
-      total,
-      lineItemsCount: lineItems.length,
-    });
-
+  
     return {
       documentType: docNum ? documentType : null,
       supplierName:
@@ -533,6 +753,497 @@ export class DocumentExtractionService {
     ]);
   }
 
+  /** When OCR splits one table row across two lines, merge so tryParseTableStyleInvoiceRow can succeed. */
+  private mergeContinuationLinesForInvoiceTable(lines: string[]): string[] {
+    const out: string[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i]!.replace(/\s+/g, ' ').trim();
+      const next = i + 1 < lines.length ? lines[i + 1]!.replace(/\s+/g, ' ').trim() : '';
+      const combined = `${line} ${next}`.trim();
+      if (
+        next &&
+        !this.tryParseTableStyleInvoiceRow(line) &&
+        this.tryParseTableStyleInvoiceRow(combined)
+      ) {
+        out.push(combined);
+        i += 2;
+        continue;
+      }
+      out.push(line);
+      i += 1;
+    }
+    return out;
+  }
+
+  private filterGarbageLineItems(items: ExtractedLineItem[]): ExtractedLineItem[] {
+    return items.filter((li) => {
+      const d = li.description.replace(/\s+/g, ' ').trim();
+      if (d.length < 2) {
+        return false;
+      }
+      if (/^(sub\s*total|subtotal|grand\s*total|amount\s*due)\b/i.test(d)) {
+        return false;
+      }
+      if (/^vat\b/i.test(d) && /\bof\b/i.test(d)) {
+        return false;
+      }
+      if (/^total\s+[£€$]?[\d.,]*\s*$/i.test(d)) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  /** Union candidates from every strategy (deduped); catches rows when one strategy finds 2 and another finds the rest. */
+  private mergeLineItemExtractionCandidates(
+    candidates: Array<{ items: ExtractedLineItem[]; preferOnTie: boolean }>,
+  ): ExtractedLineItem[] {
+    const sorted = [...candidates].sort((a, b) => {
+      const ld = b.items.length - a.items.length;
+      if (ld !== 0) {
+        return ld;
+      }
+      return (b.preferOnTie ? 1 : 0) - (a.preferOnTie ? 1 : 0);
+    });
+    const merged = this.dedupeLineItems(sorted.flatMap((c) => c.items));
+    const filtered = this.filterGarbageLineItems(merged);
+    return filtered.length > 0 ? filtered : merged;
+  }
+
+  private extractLineItemsFromDescriptionColumnTable(text: string): ExtractedLineItem[] {
+    let lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    lines = this.mergeContinuationLinesForInvoiceTable(lines);
+    const headerIdx = lines.findIndex((l) => this.looksLikeInvoiceLineItemsHeader(l));
+    const footerRe =
+      /^(sub\s*total|subtotal|total\s+(?:gbp|eur|usd)?|grand\s*total|amount\s*due)\b/i;
+
+    const parseRows = (start: number, stopAtFooter: boolean): ExtractedLineItem[] => {
+      const out: ExtractedLineItem[] = [];
+      for (let i = start; i < lines.length; i++) {
+        const line = lines[i]!;
+        if (stopAtFooter && footerRe.test(line)) {
+          break;
+        }
+        if (LOOSE_ROW_SKIP.test(line)) {
+          continue;
+        }
+        const li = this.tryParseTableStyleInvoiceRow(line);
+        if (li) {
+          out.push(li);
+        }
+      }
+      return out;
+    };
+
+    if (headerIdx >= 0) {
+      return parseRows(headerIdx + 1, true);
+    }
+
+    const unconstrained = parseRows(0, false);
+    return unconstrained.length >= 2 ? unconstrained : [];
+  }
+
+  private looksLikeInvoiceLineItemsHeader(line: string): boolean {
+    const l = line.toLowerCase();
+    const hasDesc =
+      /\b(desc|description|item|product|service|details)\b/i.test(l) ||
+      /\bdescr/i.test(l);
+    const hasQty = /\b(qty|quantity|qt\.|qt\b|menge|cantidad)\b/i.test(l);
+    const hasMoneyCol =
+      /\b(price|rate|unit|amount|total|sum|amt)\b/i.test(l) ||
+      /\b(vat|btw|mwst)\b/i.test(l);
+    return hasDesc && hasQty && hasMoneyCol;
+  }
+
+  private tryParseTableStyleInvoiceRow(line: string): ExtractedLineItem | null {
+    let s = line.replace(/\s+/g, ' ').trim();
+    if (s.length < 5) {
+      return null;
+    }
+
+    let m = s.match(/(\d[\d,'’]*[.,]?\d*)\s*$/);
+    if (!m) {
+      return null;
+    }
+    const lineTotal = this.parseMoneyToken((m[1] ?? '').replace(/'/g, ''));
+    if (lineTotal === null || lineTotal <= 0) {
+      return null;
+    }
+    s = s.slice(0, s.length - m[0].length).trim();
+
+    m = s.match(/(\d{1,3})\s*%\s*$/);
+    if (m) {
+      s = s.slice(0, s.length - m[0].length).trim();
+    }
+
+    m = s.match(/(\d[\d,'’]*[.,]?\d*)\s*$/);
+    if (!m) {
+      return null;
+    }
+    const unitPrice = this.parseMoneyToken((m[1] ?? '').replace(/'/g, ''));
+    if (unitPrice === null || unitPrice <= 0) {
+      return null;
+    }
+    s = s.slice(0, s.length - m[0].length).trim();
+
+    m = s.match(
+      /(?:each|ea\b|pcs\.?|pc\.?|box|pack|kg|g\b|m\b|hr\b|days?|hours?)\s*$/i,
+    );
+    if (m) {
+      s = s.slice(0, s.length - m[0].length).trim();
+    }
+
+    m = s.match(/(\d+)\s*$/);
+    if (!m) {
+      return null;
+    }
+    const quantity = Number(m[1]);
+    if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 500_000) {
+      return null;
+    }
+    s = s.slice(0, s.length - m[0].length).trim();
+
+    const description = s
+      .replace(/^[,.\s:-]+/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (description.length < 2 || LOOSE_ROW_SKIP.test(description)) {
+      return null;
+    }
+    if (/^(sub\s*total|subtotal|tax|vat|total|grand|shipping)\b/i.test(description)) {
+      return null;
+    }
+
+    const expected = quantity * unitPrice;
+    if (
+      Math.abs(expected - lineTotal) >
+      Math.max(LINE_ITEM_EPS, 0.02 * Math.max(lineTotal, expected, 1))
+    ) {
+      return null;
+    }
+
+    return { description, quantity, unitPrice, lineTotal };
+  }
+
+  private extractLineItemsFromRegexTableRows(text: string): ExtractedLineItem[] {
+    const blob = this.extractLineItemsFromRegexTableRowsOnNormalized(
+      text.replace(/\r/g, ' ').replace(/\s+/g, ' ').trim(),
+    );
+    const perLine = text
+      .split(/\r?\n/)
+      .map((raw) => raw.replace(/\s+/g, ' ').trim())
+      .filter((line) => line.length >= 12)
+      .flatMap((line) => this.extractLineItemsFromRegexTableRowsOnNormalized(line));
+    return this.dedupeLineItems([...blob, ...perLine]);
+  }
+
+  private extractLineItemsFromRegexTableRowsOnNormalized(normalized: string): ExtractedLineItem[] {
+    if (normalized.length < 12) {
+      return [];
+    }
+    const out: ExtractedLineItem[] = [];
+    const withEach =
+      /\b([A-Za-z][A-Za-z0-9\s'’`&.,()/-]{1,120}?)\s+(\d{1,6})\s+each\s+([\d,'’]+(?:[.,]\d{1,2})?)\s+(?:(\d{1,3})\s*%\s+)?([\d,'’]+(?:[.,]\d{1,2})?)/gi;
+    const noEach =
+      /\b([A-Za-z][A-Za-z0-9\s'’`&.,()/-]{1,120}?)\s+(\d{1,6})\s+([\d,'’]+(?:[.,]\d{1,2})?)\s+(?:(\d{1,3})\s*%\s+)?([\d,'’]+(?:[.,]\d{1,2})?)/gi;
+
+    const pushMatch = (m: RegExpExecArray) => {
+      const description = (m[1] ?? '').replace(/\s+/g, ' ').trim();
+      const quantity = Number(m[2]);
+      const unitPriceRaw = m[3];
+      const lineTotalRaw = m[5] ?? m[4];
+      const lineTotal = this.parseMoneyToken((lineTotalRaw ?? '').replace(/'/g, ''));
+      const unitPrice = this.parseMoneyToken((unitPriceRaw ?? '').replace(/'/g, ''));
+      if (
+        !description ||
+        description.length < 2 ||
+        LOOSE_ROW_SKIP.test(description) ||
+        /^(sub\s*total|total|vat)\b/i.test(description)
+      ) {
+        return;
+      }
+      if (
+        !Number.isFinite(quantity) ||
+        quantity <= 0 ||
+        lineTotal === null ||
+        unitPrice === null ||
+        unitPrice <= 0
+      ) {
+        return;
+      }
+      const expected = quantity * unitPrice;
+      if (
+        Math.abs(expected - lineTotal) >
+        Math.max(LINE_ITEM_EPS, 0.02 * Math.max(lineTotal, expected, 1))
+      ) {
+        return;
+      }
+      out.push({ description, quantity, unitPrice, lineTotal });
+    };
+
+    let m: RegExpExecArray | null;
+    while ((m = withEach.exec(normalized)) !== null) {
+      pushMatch(m);
+    }
+    noEach.lastIndex = 0;
+    while ((m = noEach.exec(normalized)) !== null) {
+      pushMatch(m);
+    }
+
+    return this.dedupeLineItems(out);
+  }
+
+  private looksLikeVatPercentToken(v: number): boolean {
+    if (!Number.isFinite(v) || v < 0 || v > 100) {
+      return false;
+    }
+    return Math.abs(v - Math.round(v)) < 1e-6 || Math.abs(v * 100 - Math.round(v * 100)) < 1e-3;
+  }
+
+  private extractPermissiveMoneyLineItems(t: string): ExtractedLineItem[] {
+    const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const out: ExtractedLineItem[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i]!;
+      if (LOOSE_ROW_SKIP.test(line)) {
+        i++;
+        continue;
+      }
+      let best: ExtractedLineItem | null = null;
+      let bestEnd = i;
+      let merged = '';
+      for (let k = 0; k < 10 && i + k < lines.length; k++) {
+        const piece = lines[i + k]!;
+        if (k > 0 && LOOSE_ROW_SKIP.test(piece)) {
+          break;
+        }
+        merged = k === 0 ? piece : `${merged} ${piece}`;
+        const li = this.tryParsePermissiveLineItem(merged);
+        if (li) {
+          best = li;
+          bestEnd = i + k;
+        }
+      }
+      if (best) {
+        out.push(best);
+        i = bestEnd + 1;
+      } else {
+        i++;
+      }
+    }
+    return this.dedupeLineItems(out);
+  }
+
+  private tryParsePermissiveLineItem(line: string): ExtractedLineItem | null {
+    const normalized = line.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!/[a-zA-Z]{2,}/.test(normalized)) {
+      return null;
+    }
+    const re = /(?:\$|€|£)?\s*(\d[\d,'’]*[.,]?\d*)/g;
+    const hits: { index: number; raw: string }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(normalized)) !== null) {
+      const raw = (m[1] ?? '').replace(/'/g, '');
+      hits.push({ index: m.index, raw });
+    }
+    if (hits.length < 3) {
+      return null;
+    }
+    const last3 = hits.slice(-3);
+    const nums = last3
+      .map((h) => this.parseMoneyToken(h.raw))
+      .filter((n): n is number => n !== null && Number.isFinite(n));
+    if (nums.length !== 3) {
+      return null;
+    }
+    const [a, b, c] = nums;
+    const orderings: Array<[number, number, number]> = [
+      [a, b, c],
+      [a, c, b],
+      [b, a, c],
+      [b, c, a],
+      [c, a, b],
+      [c, b, a],
+    ];
+    for (const [x, y, z] of orderings) {
+      const qp = this.inferQuantityAndUnitPrice(x, y, z);
+      if (!qp) {
+        continue;
+      }
+      const start = last3[0]!.index;
+      let description = normalized.slice(0, start).trim();
+      description = description
+        .replace(/^\d+\s+/, '')
+        .replace(/^[slno#\.\s]+\s*/i, '')
+        .trim();
+      if (description.length < 2 || LOOSE_ROW_SKIP.test(description)) {
+        return null;
+      }
+      if (/^(sub\s*total|subtotal|tax|vat|tva|total|grand\s*total|amount\s*due)\b/i.test(description)) {
+        return null;
+      }
+      return {
+        description,
+        quantity: qp.quantity,
+        unitPrice: qp.unitPrice,
+        lineTotal: z,
+      };
+    }
+    return null;
+  }
+
+  private extractLineItemsByScanningMoneyTriples(text: string): ExtractedLineItem[] {
+    const normalized = text.replace(/\r/g, '\n').replace(/\s+/g, ' ').trim();
+    if (normalized.length < 6) {
+      return [];
+    }
+    const tokens = this.collectMoneyTokensWithSpans(normalized);
+    const out: ExtractedLineItem[] = [];
+    let descStart = 0;
+    let i = 0;
+    while (i + 2 < tokens.length) {
+      if (i + 3 < tokens.length) {
+        const vatCand = tokens[i + 2]!.value;
+        if (this.looksLikeVatPercentToken(vatCand)) {
+          const a = tokens[i]!.value;
+          const b = tokens[i + 1]!.value;
+          const d = tokens[i + 3]!.value;
+          const quad = this.tryThreeAmountsAsLineItem(a, b, d);
+          if (quad && this.isPlausibleLineProductAmounts(quad)) {
+            const rawDesc = normalized
+              .slice(descStart, tokens[i]!.start)
+              .trim()
+              .replace(/^[,.\s:-]+/, '');
+            if (
+              rawDesc.length > 0 &&
+              /^(sub\s*total|subtotal|tax|vat|tva|discount|grand\s*total|amount\s*due)\b/i.test(
+                rawDesc,
+              )
+            ) {
+              i++;
+              continue;
+            }
+            const description =
+              rawDesc.length >= 2 && !LOOSE_ROW_SKIP.test(rawDesc)
+                ? rawDesc
+                : rawDesc.length > 0
+                  ? rawDesc
+                  : `Line ${out.length + 1}`;
+            out.push({
+              description,
+              quantity: quad.quantity,
+              unitPrice: quad.unitPrice,
+              lineTotal: quad.lineTotal,
+            });
+            descStart = tokens[i + 3]!.end;
+            i += 4;
+            continue;
+          }
+        }
+      }
+
+      const a = tokens[i]!.value;
+      const b = tokens[i + 1]!.value;
+      const c = tokens[i + 2]!.value;
+      const amounts = this.tryThreeAmountsAsLineItem(a, b, c);
+      if (amounts && this.isPlausibleLineProductAmounts(amounts)) {
+        const rawDesc = normalized
+          .slice(descStart, tokens[i]!.start)
+          .trim()
+          .replace(/^[,.\s:-]+/, '');
+        if (
+          rawDesc.length > 0 &&
+          /^(sub\s*total|subtotal|tax|vat|tva|discount|grand\s*total|amount\s*due)\b/i.test(rawDesc)
+        ) {
+          i++;
+          continue;
+        }
+        const description =
+          rawDesc.length >= 2 && !LOOSE_ROW_SKIP.test(rawDesc)
+            ? rawDesc
+            : rawDesc.length > 0
+              ? rawDesc
+              : `Line ${out.length + 1}`;
+        out.push({
+          description,
+          quantity: amounts.quantity,
+          unitPrice: amounts.unitPrice,
+          lineTotal: amounts.lineTotal,
+        });
+        descStart = tokens[i + 2]!.end;
+        i += 3;
+        continue;
+      }
+      i++;
+    }
+    return out;
+  }
+
+  private tryThreeAmountsAsLineItem(
+    a: number,
+    b: number,
+    c: number,
+  ): Pick<ExtractedLineItem, 'quantity' | 'unitPrice' | 'lineTotal'> | null {
+    const orderings: Array<[number, number, number]> = [
+      [a, b, c],
+      [a, c, b],
+      [b, a, c],
+      [b, c, a],
+      [c, a, b],
+      [c, b, a],
+    ];
+    for (const [x, y, z] of orderings) {
+      const qp = this.inferQuantityAndUnitPrice(x, y, z);
+      if (qp) {
+        return {
+          quantity: qp.quantity,
+          unitPrice: qp.unitPrice,
+          lineTotal: z,
+        };
+      }
+    }
+    return null;
+  }
+
+  private collectMoneyTokensWithSpans(
+    text: string,
+  ): Array<{ start: number; end: number; value: number }> {
+    const re = /(?:\$|€|£)?\s*(\d[\d,'’]*[.,]?\d*)/g;
+    const out: Array<{ start: number; end: number; value: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const raw = (m[1] ?? '').replace(/'/g, '');
+      const v = this.parseMoneyToken(raw);
+      if (v === null || !Number.isFinite(v)) {
+        continue;
+      }
+      out.push({ start: m.index, end: m.index + m[0].length, value: v });
+    }
+    return out;
+  }
+
+  private isPlausibleLineProductAmounts(
+    li: Pick<ExtractedLineItem, 'quantity' | 'unitPrice' | 'lineTotal'>,
+  ): boolean {
+    const q = li.quantity;
+    const u = li.unitPrice;
+    const lt = li.lineTotal;
+    if (q <= 0 || u <= 0 || lt <= 0) {
+      return false;
+    }
+    if (q > 50_000 || u > 5_000_000 || lt > 50_000_000) {
+      return false;
+    }
+    if (q >= 2000 && u < 2) {
+      return false;
+    }
+    if (u < 0.05 && q > 500) {
+      return false;
+    }
+    return true;  }
+
   private parseLoosePdfLineRows(t: string): ExtractedLineItem[] {
     const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const out: ExtractedLineItem[] = [];
@@ -544,19 +1255,71 @@ export class DocumentExtractionService {
       if (!m) {
         continue;
       }
-      const description = m[1].trim();
+      let description = m[1].trim().replace(/^\d+\s+/, '');
       if (LOOSE_ROW_SKIP.test(description) || description.length < 2) {
         continue;
       }
-      const quantity = Number(m[2].replace(',', '.'));
-      const unitPrice = Number(m[3].replace(',', '.'));
+      const a = Number(m[2].replace(',', '.'));
+      const b = Number(m[3].replace(',', '.'));
       const lineTotal = Number(m[4].replace(',', '.'));
-      if (!Number.isFinite(quantity) || !Number.isFinite(unitPrice) || !Number.isFinite(lineTotal)) {
+      if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(lineTotal)) {
         continue;
       }
-      out.push({ description, quantity, unitPrice, lineTotal });
+      const qp = this.inferQuantityAndUnitPrice(a, b, lineTotal);
+      if (!qp) {
+        continue;
+      }
+      out.push({ description, quantity: qp.quantity, unitPrice: qp.unitPrice, lineTotal });
     }
     return out;
+  }
+
+  private inferQuantityAndUnitPrice(
+    first: number,
+    second: number,
+    lineTotal: number,
+  ): { quantity: number; unitPrice: number } | null {
+    if (Math.abs(first * second - lineTotal) > LINE_ITEM_EPS) {
+      return null;
+    }
+    const d1 = this.hasMoneyLikeDecimals(first);
+    const d2 = this.hasMoneyLikeDecimals(second);
+    if (d1 && !d2) {
+      return { quantity: second, unitPrice: first };
+    }
+    if (d2 && !d1) {
+      return { quantity: first, unitPrice: second };
+    }
+    const q1 = this.looksLikeLineQuantity(first);
+    const q2 = this.looksLikeLineQuantity(second);
+    if (q1 && !q2) {
+      return { quantity: first, unitPrice: second };
+    }
+    if (q2 && !q1) {
+      return { quantity: second, unitPrice: first };
+    }
+    if (q1 && q2) {
+      const lo = Math.min(first, second);
+      const hi = Math.max(first, second);
+      if (hi >= 100 || hi >= lo * 10) {
+        return { quantity: lo, unitPrice: hi };
+      }
+      if (lo <= 10_000 && hi > lo) {
+        return { quantity: lo, unitPrice: hi };
+      }
+    }
+    return { quantity: first, unitPrice: second };
+  }
+
+  private hasMoneyLikeDecimals(n: number): boolean {
+    return Math.abs(n - Math.round(n)) > 1e-6;
+  }
+
+  private looksLikeLineQuantity(n: number): boolean {
+    if (n <= 0 || n > 500_000) {
+      return false;
+    }
+    return Math.abs(n - Math.round(n)) < 1e-6;
   }
 
   private parseLooseCommaSeparatedLineRows(t: string): ExtractedLineItem[] {
@@ -601,7 +1364,7 @@ export class DocumentExtractionService {
     if (s == null || s === '') {
       return null;
     }
-    const raw = String(s).trim();
+    const raw = String(s).trim().replace(/%/g, '').trim();
     for (const token of raw.split(/\s+/)) {
       const n = this.parseMoneyToken(token);
       if (n !== null) {
@@ -661,11 +1424,47 @@ export class DocumentExtractionService {
   }
 
   private parseDate(s: string | null | undefined): Date | null {
-    if (s == null || !s.trim()) {
+    if (s == null) {
       return null;
     }
-    const d = new Date(s.trim());
-    return Number.isNaN(d.getTime()) ? null : d;
+    let raw = String(s).trim().replace(/\s+/g, ' ');
+    if (!raw) {
+      return null;
+    }
+    raw = raw.replace(/[.,;:]+$/u, '');
+
+    raw = raw.replace(
+      /(\d{1,4})\s*([/.-])\s*(\d{1,2})\s*([/.-])\s*(\d{2,4})/,
+      (_, d1, s1, d2, s2, y) => `${d1}${s1}${d2}${s2}${y}`,
+    );
+
+    const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s]|$)/.exec(raw);
+    if (iso) {
+      const y = parseInt(iso[1], 10);
+      const mo = parseInt(iso[2], 10) - 1;
+      const day = parseInt(iso[3], 10);
+      const d = new Date(y, mo, day);
+      if (d.getFullYear() === y && d.getMonth() === mo && d.getDate() === day) {
+        return d;
+      }
+    }
+
+    const dmy = /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})(?:\D|$)/.exec(raw);
+    if (dmy) {
+      const day = parseInt(dmy[1], 10);
+      const month = parseInt(dmy[2], 10) - 1;
+      let year = parseInt(dmy[3], 10);
+      if (year < 100) {
+        year += year >= 70 ? 1900 : 2000;
+      }
+      const d = new Date(year, month, day);
+      if (!Number.isNaN(d.getTime()) && d.getDate() === day && d.getMonth() === month) {
+        return d;
+      }
+    }
+
+    const fallback = new Date(raw);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
   }
 
   private findCsvColumnIndex(header: string[], alias: string): number {

@@ -129,14 +129,6 @@ export class DocumentsService {
     const storagePath = path.posix.join(relDir.replace(/\\/g, '/'), storedFileName);
 
     await fs.writeFile(absolutePath, file.buffer);
-    console.log('[documents.upload] saved file', {
-      originalName: file.originalname,
-      mimeType: file.mimetype,
-      sourceType,
-      absolutePath,
-      storagePath,
-      size: file.size,
-    });
 
     const originalName = path.basename(file.originalname);
     let created: Document & {
@@ -460,22 +452,6 @@ export class DocumentsService {
     sourceType: DocumentSourceType,
   ): Promise<void> {
     const extracted = await this.extraction.extractFromFile(absolutePath, sourceType);
-    console.log('[documents.processDocument] extracted', {
-      id,
-      sourceType,
-      documentType: extracted.documentType,
-      supplierName: extracted.supplierName,
-      documentNumber: extracted.documentNumber,
-      issueDate: extracted.issueDate?.toISOString?.() ?? extracted.issueDate,
-      dueDate: extracted.dueDate?.toISOString?.() ?? extracted.dueDate,
-      currency: extracted.currency,
-      subtotal: extracted.subtotal,
-      tax: extracted.tax,
-      total: extracted.total,
-      lineItemsCount: extracted.lineItems.length,
-      ingestionNotes: extracted.ingestionNotes,
-    });
-
     const lineCreates = extracted.lineItems.map((li, i) => ({
       documentId: id,
       itemOrder: i,

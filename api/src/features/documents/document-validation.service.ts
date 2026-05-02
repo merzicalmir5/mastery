@@ -3,6 +3,9 @@ import { Document, DocumentLineItem, ValidationSeverity } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 const EPS = 0.02;
+const MS_PER_DAY = 86_400_000;
+const MAX_ISSUE_AGE_YEARS = 15;
+const MAX_DUE_DAYS_AFTER_ISSUE = 5 * 365;
 
 type DocWithLines = Document & { lineItems: DocumentLineItem[] };
 
@@ -10,7 +13,6 @@ type DocWithLines = Document & { lineItems: DocumentLineItem[] };
 export class DocumentValidationService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Replaces all validation rows for the document. */
   async run(documentId: string): Promise<void> {
     await this.prisma.documentValidationIssue.deleteMany({ where: { documentId } });
 
@@ -78,14 +80,6 @@ export class DocumentValidationService {
         fieldPath: 'issueDate',
         code: 'MISSING_FIELD',
         message: 'Issue date is missing.',
-        severity: 'WARNING',
-      });
-    }
-    if (!doc.dueDate) {
-      issues.push({
-        fieldPath: 'dueDate',
-        code: 'MISSING_FIELD',
-        message: 'Due date is missing.',
         severity: 'WARNING',
       });
     }
@@ -162,6 +156,61 @@ export class DocumentValidationService {
         severity: 'WARNING',
       });
     }
+
+    const now = Date.now();
+
+    if (doc.issueDate) {
+      const t = doc.issueDate.getTime();
+      if (t > now) {
+        issues.push({
+          fieldPath: 'issueDate',
+          code: 'ISSUE_FUTURE',
+          message: 'Issue date is in the future (relative to server time).',
+          severity: 'WARNING',
+        });
+      }
+      if (t < now - MS_PER_DAY * 365 * MAX_ISSUE_AGE_YEARS) {
+        issues.push({
+          fieldPath: 'issueDate',
+          code: 'ISSUE_VERY_OLD',
+          message: `Issue date is more than ${MAX_ISSUE_AGE_YEARS} years ago — check extraction.`,
+          severity: 'WARNING',
+        });
+      }
+      const dow = doc.issueDate.getUTCDay();
+      if (dow === 0 || dow === 6) {
+        issues.push({
+          fieldPath: 'issueDate',
+          code: 'ISSUE_WEEKEND',
+          message: 'Issue date falls on a weekend (UTC weekday).',
+          severity: 'WARNING',
+        });
+      }
+    }
+
+    if (doc.dueDate) {
+      const dow = doc.dueDate.getUTCDay();
+      if (dow === 0 || dow === 6) {
+        issues.push({
+          fieldPath: 'dueDate',
+          code: 'DUE_WEEKEND',
+          message: 'Due date falls on a weekend (UTC weekday).',
+          severity: 'WARNING',
+        });
+      }
+    }
+
+    if (doc.issueDate && doc.dueDate) {
+      const days = (doc.dueDate.getTime() - doc.issueDate.getTime()) / MS_PER_DAY;
+      if (days > MAX_DUE_DAYS_AFTER_ISSUE) {
+        issues.push({
+          fieldPath: 'dueDate',
+          code: 'DUE_VERY_FAR',
+          message: `Due date is more than ${MAX_DUE_DAYS_AFTER_ISSUE / 365} years after issue date.`,
+          severity: 'WARNING',
+        });
+      }
+    }
   }
 
   private checkTotals(doc: DocWithLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
@@ -175,6 +224,25 @@ export class DocumentValidationService {
           fieldPath: 'total',
           code: 'TOTAL_MISMATCH',
           message: 'Subtotal + tax does not match total.',
+          severity: 'ERROR',
+        });
+      }
+    }
+
+    const sumLines =
+      doc.lineItems.length > 0
+        ? doc.lineItems.reduce((s, li) => s + Number(li.lineTotal), 0)
+        : null;
+    if (sumLines !== null && tax !== null && tot !== null) {
+      const grandFromLinesOff = Math.abs(sumLines + tax - tot) > EPS;
+      const subDiffersFromLines =
+        sub === null || Math.abs(sumLines - sub) > EPS;
+      if (grandFromLinesOff && subDiffersFromLines) {
+        issues.push({
+          fieldPath: 'total',
+          code: 'LINE_TAX_TOTAL',
+          message:
+            'Sum of line totals + tax does not match document total (often means subtotal vs lines mismatch or VAT-inclusive lines — review amounts).',
           severity: 'ERROR',
         });
       }

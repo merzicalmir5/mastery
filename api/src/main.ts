@@ -6,11 +6,7 @@ import { PrismaService } from './core/prisma/prisma.service';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  console.log(
-    '[bootstrap] starting PORT_env=%s NODE_ENV=%s',
-    process.env.PORT ?? '(unset)',
-    process.env.NODE_ENV ?? '(unset)',
-  );
+
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(new FileLogger('NestApplication'));
@@ -35,12 +31,18 @@ async function bootstrap() {
     `[bootstrap] listening on 0.0.0.0:${listenPort} (process.env.PORT=${JSON.stringify(process.env.PORT)})`,
   );
 
+  const docsPath = 'docs';
+
   app.getHttpAdapter().get('/', (_req, res) => {
-    res.redirect('/api/docs');
+    res.redirect(`/${docsPath}`);
+  });
+  app.getHttpAdapter().get('/api/docs', (_req, res) => {
+    res.redirect(`/${docsPath}`);
   });
 
   try {
-    const swaggerConfig = new DocumentBuilder()
+    const appBase = process.env.APP_BASE_URL?.replace(/\/$/, '');
+    const swaggerBuilder = new DocumentBuilder()
       .setTitle('Mastery API')
       .setDescription('Smart Document Processing API documentation')
       .setVersion('1.0')
@@ -53,12 +55,15 @@ async function bootstrap() {
             'Access token from POST /auth/login (paste without "Bearer " prefix).',
         },
         'access-token',
-      )
-      .build();
+      );
+    if (appBase) {
+      swaggerBuilder.addServer(appBase, 'Configured server');
+    }
+    const swaggerConfig = swaggerBuilder.build();
     const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
     swaggerDocument.security = [{ 'access-token': [] }];
-    SwaggerModule.setup('api/docs', app, swaggerDocument);
-    console.log('[bootstrap] Swagger mounted at /api/docs');
+    SwaggerModule.setup(docsPath, app, swaggerDocument);
+    console.log(`[bootstrap] Swagger UI at /${docsPath} (open the Railway API URL, not the Vercel app)`);
   } catch (err: unknown) {
     console.error('[bootstrap] Swagger setup failed (HTTP API still up)', err);
   }

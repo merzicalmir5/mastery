@@ -228,6 +228,8 @@ const TOTAL_LABELS = [
 const ISSUE_DATE_LABELS = [
   'Issue date',
   'Invoice date',
+  /** English templates often use a standalone “Date” next to the invoice # (no “Issue”). */
+  'Date',
   'Datum',
   'Date de facturation',
   'Date facture',
@@ -244,7 +246,6 @@ const ISSUE_DATE_LABELS = [
 
 const DUE_DATE_LABELS = [
   'Due date',
-  'Payment due',
   'Pay by',
   'Fällig',
   'Fälligkeitsdatum',
@@ -256,10 +257,19 @@ const DUE_DATE_LABELS = [
   'Data płatności',
   'Termín splatnosti',
   'Datum dospijeća',
+  'Rok plaćanja',
+  'Rok placanja',
+  'Datum valute',
   'Valuta plaćanja',
+  'Platiti do',
+  'Datum dospeća',
+  'Datum dospelosti',
+  'Zadnji dan plaćanja',
   'Forfallsdato',
   'Eräpäivä',
   'Vade',
+  /** Can be an amount, not a date — try only when capture looks like a date (see extractDueDateLoose). */
+  'Payment due',
 ];
 
 export const I18N_REGEX = {
@@ -309,6 +319,17 @@ export const CURRENCY_FINDER = new RegExp(`\\b(${ISO_CURRENCY_CODES})\\b`, 'i');
 
 export function extractCurrencyLoose(text: string): string | null {
   const t = text.replace(/\r/g, '\n');
+
+  if (/\bUSD\b|\bUS\s*\$\b|\bdollars?\b/i.test(t)) {
+    return 'USD';
+  }
+
+  const dollarHints =
+    /\$\s*[\d.,]+|[\d.,]+\s*\$|\$\s*$/m.test(t) || (t.match(/\$/g) ?? []).length >= 1;
+  if (dollarHints) {
+    return 'USD';
+  }
+
   const codes = ISO_CURRENCY_CODES;
 
   const fromTotal = new RegExp(
@@ -421,7 +442,22 @@ export const META_ALIASES = {
     'nr',
   ],
   issueDate: ['issue_date', 'invoice_date', 'date', 'datum', 'data_fattura', 'fecha', 'data_wystawienia'],
-  dueDate: ['due_date', 'due', 'echéance', 'échéance', 'scadenza', 'vencimiento', 'termin'],
+  dueDate: [
+    'due_date',
+    'due',
+    'datum_valute',
+    'datum_valute_placanja',
+    'rok_placanja',
+    'rok_plaćanja',
+    'valuta_placanja',
+    'datum_dospijeca',
+    'datum_dospijeća',
+    'echéance',
+    'échéance',
+    'scadenza',
+    'vencimiento',
+    'termin',
+  ],
   subtotal: ['subtotal', 'sub_total', 'zwischensumme', 'sous_total', 'imponibile'],
   tax: ['tax', 'vat', 'tva', 'mwst', 'iva', 'pdv', 'ddv', 'porez'],
   total: ['total', 'grand_total', 'amount', 'gesamtbetrag', 'totale', 'importe_total', 'razem', 'ukupno'],
@@ -440,7 +476,31 @@ export function pickMeta(meta: Record<string, string>, keys: string[]): string |
 
 export function extractSupplierLoose(text: string): string | null {
   const m = I18N_REGEX.supplierLine.exec(text);
-  return m?.[1]?.trim() ?? null;
+  if (m?.[1]?.trim()) {
+    return m[1].trim();
+  }
+
+  const invoiceTo = /\b(?:invoice|bill)\s+to\s*:/i.exec(text);
+  if (invoiceTo && invoiceTo.index > 0) {
+    const head = text.slice(0, invoiceTo.index);
+    const lines = head.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (/^invoice$/i.test(line)) {
+        continue;
+      }
+      if (/tagline/i.test(line)) {
+        continue;
+      }
+      if (/^sl\.?\s*$/i.test(line)) {
+        continue;
+      }
+      if (line.length >= 2 && line.length <= 160 && /[a-zA-Z]/.test(line)) {
+        return line.replace(/\s+/g, ' ').trim();
+      }
+    }
+  }
+
+  return null;
 }
 
 export function extractInvoiceNumberLoose(text: string): string | null {
@@ -474,13 +534,172 @@ export function extractMoneyAfterLabels(text: string): {
   };
 }
 
-export function extractIssueDateLoose(text: string): string | null {
-  return I18N_REGEX.issueDateLine.exec(text)?.[1]?.trim() ?? null;
+/**
+ * Footer scrape when OCR breaks labels (spacing, typos). Reads the last ~45 lines only.
+ */
+export function extractInvoiceFooterAmountsLoose(text: string): {
+  subtotal: string | null;
+  tax: string | null;
+  total: string | null;
+} {
+  const tail = text.length > 6000 ? text.slice(-6000) : text;
+  const lines = tail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const bottom = lines.slice(-45);
+
+  let subtotal: string | null = null;
+  let tax: string | null = null;
+
+  for (const line of bottom) {
+    const low = line.toLowerCase();
+    if (
+      subtotal == null &&
+      /sub\s*[-]?\s*tot|subtotal|sub\s+total|sous[- ]total|zwischen/.test(low)
+    ) {
+      const g =
+        line.match(/([+\-]?\d[\d,'’]*[.,]\d{2})\b/) ??
+        line.match(/(?:\$|€|£)\s*([+\-]?\d[\d,'’]*[.,]\d{2})/);
+      if (g?.[1]) {
+        subtotal = g[1];
+      }
+    }
+    if (tax == null && /(?:^|[\s|])(?:tax|vat|tva|pdv|porez)\b/i.test(low)) {
+      const g = line.match(/([+\-]?\d[\d,'’]*[.,]?\d*)\s*%?/);
+      if (g?.[1]) {
+        tax = g[1];
+      }
+    }
+  }
+
+  let total: string | null = null;
+  for (let i = bottom.length - 1; i >= 0; i--) {
+    const line = bottom[i]!;
+    const low = line.toLowerCase();
+    if (/sub\s*[-]?\s*tot|subtotal/.test(low)) {
+      continue;
+    }
+    if (
+      /\b(?:grand\s+)?total\b|amount\s*due|balance\s*due|montant\s+total|ukupno/i.test(low) &&
+      !/sub/.test(low)
+    ) {
+      let g =
+        line.match(/([+\-]?\d[\d,'’]*[.,]\d{2})\b/) ??
+        line.match(/(?:\$|€|£)\s*([+\-]?\d[\d,'’]*[.,]\d{2})/);
+      if (!g?.[1] && i + 1 < bottom.length) {
+        const next = bottom[i + 1]!;
+        g =
+          next.match(/^\s*(?:\$|€|£)?\s*([+\-]?\d[\d,'’]*[.,]\d{2})\b/) ??
+          next.match(/([+\-]?\d[\d,'’]*[.,]\d{2})\b/);
+      }
+      if (g?.[1]) {
+        total = g[1];
+        break;
+      }
+    }
+  }
+
+  if (total == null) {
+    for (let i = bottom.length - 1; i >= 0; i--) {
+      const line = bottom[i]!;
+      const low = line.toLowerCase();
+      if (/\btotal\b/i.test(low) && !/sub/.test(low)) {
+        const g =
+          line.match(/([+\-]?\d[\d,'’]*[.,]\d{2})\b/) ??
+          line.match(/(?:\$|€|£)\s*([+\-]?\d[\d,'’]*[.,]\d{2})/);
+        if (g?.[1]) {
+          total = g[1];
+          break;
+        }
+      }
+    }
+  }
+
+  return { subtotal, tax, total };
 }
 
+export function captureLooksLikeDate(s: string): boolean {
+  const t = s.trim();
+  if (!t) {
+    return false;
+  }
+  return (
+    /\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4}/.test(t) ||
+    /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(t) ||
+    /\d{4}-\d{2}-\d{2}/.test(t) ||
+    /\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{2,4}/i.test(t)
+  );
+}
+
+/** First calendar-like date in the header area when labelled lines fail (OCR noise). */
+export function extractAnyNumericDateLoose(text: string): string | null {
+  const head = text.slice(0, Math.min(text.length, 9000));
+  const re = /\b(\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4})\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(head)) !== null) {
+    const cap = m[1]?.trim();
+    if (cap && captureLooksLikeDate(cap)) {
+      return cap.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return null;
+}
+
+export function extractIssueDateLoose(text: string): string | null {
+  const t = text.replace(/\r/g, '\n');
+
+  const re = I18N_REGEX.issueDateLine;
+  const globalFlags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const r = new RegExp(re.source, globalFlags);
+  let m: RegExpExecArray | null;
+  while ((m = r.exec(t)) !== null) {
+    let cap = m[1]?.trim() ?? '';
+    if (captureLooksLikeDate(cap)) {
+      return cap.replace(/\s+/g, ' ').trim();
+    }
+    const rest = t.slice((m.index ?? 0) + (m[0]?.length ?? 0));
+    const nextDate = /^\s*[.:_-]?\s*\n\s*(\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4})/m.exec(rest);
+    const cand = nextDate?.[1]?.trim();
+    if (cand && captureLooksLikeDate(cand)) {
+      return cand.replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  const header = t.slice(0, Math.min(t.length, 4500));
+  const nearInvoice = /\b(?:invoice|facture|rechnung|faktura)\b[\s\S]{0,900}?(\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4})/i.exec(
+    header,
+  );
+  if (nearInvoice?.[1] && captureLooksLikeDate(nearInvoice[1])) {
+    return nearInvoice[1].replace(/\s+/g, ' ').trim();
+  }
+
+  const firstNumeric = /\b(\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4})\b/.exec(header);
+  if (firstNumeric?.[1] && classifyDocTypeHint(t) === 'INVOICE') {
+    return firstNumeric[1].replace(/\s+/g, ' ').trim();
+  }
+
+  return null;
+}
+
+/** Match group 1 if it looks like a date (skip "Payment due: 1.234,00" style lines). */
+const LOOKS_LIKE_DATE =
+  /\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{2,4}/i;
+
 export function extractDueDateLoose(text: string): string | null {
-  return I18N_REGEX.dueDateLine.exec(text)?.[1]?.trim() ?? null;
+  const re = I18N_REGEX.dueDateLine;
+  const globalFlags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+  const r = new RegExp(re.source, globalFlags);
+  let m: RegExpExecArray | null;
+  let last: string | null = null;
+  while ((m = r.exec(text)) !== null) {
+    const cap = m[1]?.trim();
+    if (cap) {
+      last = cap;
+      if (LOOKS_LIKE_DATE.test(cap) || captureLooksLikeDate(cap)) {
+        return cap;
+      }
+    }
+  }
+  return last;
 }
 
 export const LOOSE_ROW_SKIP =
-  /^(invoice|facture|rechnung|faktura|fattura|supplier|fournisseur|lieferant|number|broj|datum|date|subtotal|sous|zwischen|tax|tva|vat|mwst|total|totale|gesamt|description|qty|quantity|menge|quantité|cantidad|prezzo|price|prix|betrag)/i;
+  /^(invoice|facture|rechnung|faktura|fattura|supplier|fournisseur|lieferant|number|broj|datum|date|subtotal|sous|zwischen|tax|tva|vat|mwst|total|totale|gesamt|description|qty|quantity|menge|quantité|cantidad|prezzo|price|prix|betrag|sl\.?|no\.?|item\s*description)/i;
