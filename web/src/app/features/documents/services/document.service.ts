@@ -37,6 +37,7 @@ interface DocumentApiRow {
     quantity: number;
     unitPrice: number;
     lineTotal: number;
+    unitLabel: string | null;
   }[];
   validationIssues: {
     id: string;
@@ -59,6 +60,12 @@ export interface PageParams {
   page: number;
   pageSize: number;
   status?: DocumentStatus;
+  q?: string;
+  fileName?: string;
+  documentKind?: DocumentKind;
+  updatedFrom?: string;
+  updatedTo?: string;
+  issueFilter?: 'has' | 'none';
 }
 
 export interface PageMeta {
@@ -73,6 +80,7 @@ export type DocumentLineItemPatch = {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  unitLabel?: string;
 };
 
 export type UploadFileEvent =
@@ -131,6 +139,7 @@ function mapRow(api: DocumentApiRow): DocumentRecord {
       quantity: li.quantity,
       unitPrice: li.unitPrice,
       lineTotal: li.lineTotal,
+      unitLabel: li.unitLabel ?? undefined,
     })),
     validationIssues: issues,
     updatedAt: api.updatedAt,
@@ -164,6 +173,24 @@ export class DocumentService {
     };
     if (params?.status) {
       query['status'] = params.status;
+    }
+    if (params?.q?.trim()) {
+      query['q'] = params.q.trim();
+    }
+    if (params?.fileName?.trim()) {
+      query['fileName'] = params.fileName.trim();
+    }
+    if (params?.documentKind) {
+      query['documentKind'] = params.documentKind;
+    }
+    if (params?.updatedFrom?.trim()) {
+      query['updatedFrom'] = params.updatedFrom.trim();
+    }
+    if (params?.updatedTo?.trim()) {
+      query['updatedTo'] = params.updatedTo.trim();
+    }
+    if (params?.issueFilter) {
+      query['issueFilter'] = params.issueFilter;
     }
 
     return this.http.get<PaginatedResponse<DocumentApiRow>>(`${this.apiUrl}/documents`, { params: query }).pipe(

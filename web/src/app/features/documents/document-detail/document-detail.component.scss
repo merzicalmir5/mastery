@@ -156,6 +156,17 @@
     grid-template-columns: 1fr 5.5rem 5.5rem 6.5rem auto;
     gap: 0.5rem 0.65rem;
     align-items: start;
+
+    &--header {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--app-text-secondary);
+      margin-bottom: -0.15rem;
+    }
+  }
+
+  &__line-header-cell {
+    padding: 0 0.25rem;
   }
 
   @media (max-width: 900px) {

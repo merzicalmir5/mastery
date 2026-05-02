@@ -16,6 +16,7 @@ export interface LineItem {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  unitLabel?: string | null;
 }
 
 export interface DocumentRecord {

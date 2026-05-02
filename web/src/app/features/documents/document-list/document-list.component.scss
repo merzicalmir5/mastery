@@ -6,6 +6,30 @@
     font-size: 0.92rem;
   }
 
+  &__filters {
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  &__filter-search {
+    width: 100%;
+  }
+
+  &__filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0.65rem 0.75rem;
+    align-items: end;
+  }
+
+  &__filter-actions {
+    display: flex;
+    align-items: center;
+    min-height: 2.5rem;
+  }
+
   &__empty {
     padding: 1.25rem;
     border: 1px dashed rgba(17, 24, 39, 0.2);
