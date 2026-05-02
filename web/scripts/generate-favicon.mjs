@@ -42,8 +42,6 @@ async function main() {
     })
     .png()
     .toFile(out32);
-
-  console.log('Wrote', outIco, out32);
 }
 
 main().catch((e) => {

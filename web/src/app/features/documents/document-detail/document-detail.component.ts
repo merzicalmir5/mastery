@@ -1,14 +1,16 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, effect, inject } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { ActivatedRoute, Router } from '@angular/router';
-import { map } from 'rxjs/operators';
+import { map, switchMap, take, takeWhile, tap } from 'rxjs/operators';
+import { timer } from 'rxjs';
 import type { LineItem } from '../models/document.models';
 import { DocumentFilePreviewComponent } from '../document-file-preview/document-file-preview.component';
 import { DocumentService, type DocumentLineItemPatch } from '../services/document.service';
@@ -24,6 +26,7 @@ import { DocumentService, type DocumentLineItemPatch } from '../services/documen
     MatInputModule,
     MatSelectModule,
     MatButtonModule,
+    MatProgressSpinnerModule,
     DocumentFilePreviewComponent,
   ],
   templateUrl: './document-detail.component.html',
@@ -35,14 +38,28 @@ export class DocumentDetailComponent {
   private readonly fb = inject(FormBuilder);
   private readonly documents = inject(DocumentService);
 
-  private readonly docId = toSignal(
+  readonly documentId = toSignal(
     this.route.paramMap.pipe(map((p) => p.get('id'))),
     { initialValue: this.route.snapshot.paramMap.get('id') },
   );
 
+  readonly showDetailSpinner = computed(() => {
+    const id = this.documentId();
+    if (!id || this.detailLoadFailed()) {
+      return false;
+    }
+    const d = this.doc();
+    if (!d) {
+      return true;
+    }
+    return d.status === 'uploaded';
+  });
+
+  readonly detailLoadFailed = signal(false);
+
   readonly doc = computed(() => {
     this.documents.data();
-    const id = this.docId();
+    const id = this.documentId();
     return id ? this.documents.getById(id) : undefined;
   });
 
@@ -61,11 +78,33 @@ export class DocumentDetailComponent {
 
   constructor() {
     effect((onCleanup) => {
-      const id = this.docId();
+      const id = this.documentId();
       if (!id) {
+        this.detailLoadFailed.set(false);
         return;
       }
-      const sub = this.documents.loadOne(id).subscribe();
+      this.detailLoadFailed.set(false);
+      let firstPoll = true;
+      const pollMs = 280;
+      const maxPolls = 220;
+      const sub = timer(0, pollMs)
+        .pipe(
+          take(maxPolls),
+          switchMap(() => this.documents.loadOne(id)),
+          tap((ok) => {
+            if (firstPoll) {
+              firstPoll = false;
+              if (!ok) {
+                this.detailLoadFailed.set(true);
+              }
+            }
+          }),
+          map((ok) =>
+            ok ? this.documents.getById(id)?.status ?? 'needs_review' : 'needs_review',
+          ),
+          takeWhile((status) => status === 'uploaded', true),
+        )
+        .subscribe();
       onCleanup(() => sub.unsubscribe());
     });
     effect(() => {
@@ -140,7 +179,6 @@ export class DocumentDetailComponent {
     this.lineItemsArray.removeAt(index);
   }
 
-  /** Rows with a non-empty description are sent to the API. */
   collectLineItems(): DocumentLineItemPatch[] {
     return this.lineItemsArray.controls
       .map((ctrl) => ctrl.getRawValue() as Record<string, unknown>)
@@ -158,7 +196,7 @@ export class DocumentDetailComponent {
   }
 
   save(): void {
-    const id = this.docId();
+    const id = this.documentId();
     if (!id) {
       return;
     }
@@ -182,7 +220,7 @@ export class DocumentDetailComponent {
   }
 
   confirm(): void {
-    const id = this.docId();
+    const id = this.documentId();
     if (!id) {
       return;
     }
@@ -206,7 +244,7 @@ export class DocumentDetailComponent {
   }
 
   reject(): void {
-    const id = this.docId();
+    const id = this.documentId();
     if (!id) {
       return;
     }
@@ -216,7 +254,7 @@ export class DocumentDetailComponent {
   }
 
   remove(): void {
-    const id = this.docId();
+    const id = this.documentId();
     if (!id) {
       return;
     }

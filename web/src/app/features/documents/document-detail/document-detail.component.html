@@ -1,6 +1,22 @@
-@if (!doc()) {
+@if (showDetailSpinner()) {
+  <section class="doc-detail doc-detail--loading" aria-busy="true" aria-live="polite">
+    <mat-progress-spinner mode="indeterminate" diameter="44" />
+    <p class="doc-detail__loading-text">Preparing document and mapping data…</p>
+    <p class="doc-detail__loading-sub">
+      Stay on this page while we fetch the file and finish extraction. This may take a little while
+      if the document is still being processed.
+    </p>
+  </section>
+} @else if (!doc()) {
   <section class="doc-detail doc-detail--missing">
     <h1 class="doc-detail__title">Document not found</h1>
+    <p class="doc-detail__missing-hint">
+      @if (detailLoadFailed()) {
+        We couldn’t load this document (it may have been deleted or you may not have access).
+      } @else {
+        The document isn’t available yet. Try refreshing the page.
+      }
+    </p>
     <button mat-stroked-button type="button" (click)="back()">Back to list</button>
   </section>
 } @else {
@@ -141,7 +157,7 @@
               appearance="outline"
             >
               <mat-label>Subtotal</mat-label>
-              <input matInput type="number" formControlName="subtotal" />
+              <input matInput type="number" step="0.01" formControlName="subtotal" />
             </mat-form-field>
             @for (m of issuesForField('subtotal'); track m) {
               <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
@@ -155,7 +171,7 @@
               appearance="outline"
             >
               <mat-label>Tax</mat-label>
-              <input matInput type="number" formControlName="tax" />
+              <input matInput type="number" step="0.01" formControlName="tax" />
             </mat-form-field>
             @for (m of issuesForField('tax'); track m) {
               <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
@@ -169,7 +185,7 @@
               appearance="outline"
             >
               <mat-label>Total</mat-label>
-              <input matInput type="number" formControlName="total" />
+              <input matInput type="number" step="0.01" formControlName="total" />
             </mat-form-field>
             @for (m of issuesForField('total'); track m) {
               <div class="doc-detail__msg doc-detail__msg--error">{{ m }}</div>
@@ -205,7 +221,7 @@
                 appearance="outline"
               >
                 <mat-label>Qty</mat-label>
-                <input matInput type="number" formControlName="quantity" />
+                <input matInput type="number" step="any" formControlName="quantity" />
               </mat-form-field>
               <mat-form-field
                 class="doc-detail__line-field"
@@ -213,7 +229,7 @@
                 appearance="outline"
               >
                 <mat-label>Unit</mat-label>
-                <input matInput type="number" formControlName="unitPrice" />
+                <input matInput type="number" step="0.01" formControlName="unitPrice" />
               </mat-form-field>
               <mat-form-field
                 class="doc-detail__line-field"
@@ -221,7 +237,7 @@
                 appearance="outline"
               >
                 <mat-label>Line total</mat-label>
-                <input matInput type="number" formControlName="lineTotal" />
+                <input matInput type="number" step="0.01" formControlName="lineTotal" />
               </mat-form-field>
               <button
                 mat-stroked-button

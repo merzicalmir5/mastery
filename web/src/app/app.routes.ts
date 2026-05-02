@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
+import { redirectDashboardDocumentDetailGuard } from './core/routing/redirect-dashboard-document-detail.guard';
 
 export const routes: Routes = [
   {
@@ -34,6 +35,14 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/reset-password/reset-password.component').then(
         (m) => m.ResetPasswordComponent,
+      ),
+  },
+  {
+    path: 'documents/:id',
+    canActivate: [authGuard, redirectDashboardDocumentDetailGuard],
+    loadComponent: () =>
+      import('./features/documents/document-detail/document-detail.component').then(
+        (m) => m.DocumentDetailComponent,
       ),
   },
   {

@@ -1,6 +1,6 @@
 import { HttpClient, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { EMPTY, Observable, filter, map, mergeMap, of, tap } from 'rxjs';
+import { EMPTY, Observable, catchError, filter, map, mergeMap, of, tap } from 'rxjs';
 import { API_URL } from '../../../core/config/api-url.token';
 import type {
   DocumentKind,
@@ -180,11 +180,12 @@ export class DocumentService {
     );
   }
 
-  /** Load one document and merge into the store. */
-  loadOne(id: string): Observable<void> {
+  /** Load one document and merge into the store. Returns false on HTTP error (e.g. 404). */
+  loadOne(id: string): Observable<boolean> {
     return this.http.get<DocumentApiRow>(`${this.apiUrl}/documents/${id}`).pipe(
       tap((row) => this.upsert(mapRow(row))),
-      map(() => undefined),
+      map(() => true),
+      catchError(() => of(false)),
     );
   }
 

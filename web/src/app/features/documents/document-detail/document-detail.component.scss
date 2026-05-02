@@ -1,4 +1,37 @@
 .doc-detail {
+  &--loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    min-height: 40vh;
+    padding: 2rem 1rem;
+    text-align: center;
+  }
+
+  &__loading-text {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--app-text-primary);
+  }
+
+  &__loading-sub {
+    margin: 0;
+    max-width: 22rem;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    color: var(--app-text-secondary);
+  }
+
+  &__missing-hint {
+    margin: 0 0 1rem;
+    font-size: 0.9rem;
+    color: var(--app-text-secondary);
+    max-width: 26rem;
+  }
+
   &--missing {
     padding: 0.5rem 0;
   }
