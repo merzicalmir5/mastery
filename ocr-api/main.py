@@ -1,7 +1,7 @@
 """
-Lightweight OCR HTTP API for NestJS (EasyOCR).
+Document OCR HTTP API (FastAPI + EasyOCR).
 Run: uvicorn main:app --host 0.0.0.0 --port 8000
-Railway: set start command to uvicorn with $PORT; this file as root.
+Deploy: Dockerfile CMD or Railway startCommand with $PORT.
 """
 
 from __future__ import annotations
@@ -613,9 +613,19 @@ def inject_implicit_quantity_before_each_rows(
     return out
 
 
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm model on startup so first request is not 60s+
+    # Warm model on startup so first request is not 60s+ (local/Docker Compose).
+    # On Railway: set OCR_SKIP_STARTUP_WARMUP=1 so /health returns quickly and deploy
+    # does not OOM or exceed healthcheck while downloading PyTorch/EasyOCR weights.
+    if _env_truthy("OCR_SKIP_STARTUP_WARMUP"):
+        log.info("skipping EasyOCR warmup (OCR_SKIP_STARTUP_WARMUP); first OCR request may be slow")
+        yield
+        return
     try:
         _get_reader()
         log.info("EasyOCR reader ready")
@@ -640,7 +650,11 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"ok": True, "engine": "easyocr"}
+    return {
+        "ok": True,
+        "engine": "easyocr",
+        "readerLoaded": _reader is not None,
+    }
 
 
 @app.post("/ocr/image")
