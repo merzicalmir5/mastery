@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DocumentSourceType, DocumentType } from '@prisma/client';
 import * as fs from 'fs/promises';
 import {
@@ -18,9 +19,6 @@ import {
   extractSupplierLoose,
   pickMeta,
 } from './document-i18n';
-import { OCR_INITIAL_LANGS, detectTesseractRefinementLang } from './ocr-language';
-import { preprocessImageForOcr } from './ocr-preprocess';
-
 export type ExtractedLineItem = {
   description: string;
   quantity: number;
@@ -47,6 +45,8 @@ const LINE_ITEM_EPS = 0.02;
 
 @Injectable()
 export class DocumentExtractionService {
+  constructor(private readonly config: ConfigService) {}
+
   async extractFromFile(
     absolutePath: string,
     sourceType: DocumentSourceType,
@@ -120,190 +120,110 @@ export class DocumentExtractionService {
     return this.parseTextContent(text);
   }
 
-  private readonly OCR_LINE_ITEMS_STOP_AT = 4;
-
-  /** Debug: šta tesseract.js zapravo vrati iz worker.recognize (bez ogromnih polja tipa hocr/pdf). */
-  private logTesseractRecognizeSnapshot(
-    label: string,
-    res: { jobId?: string; data?: Record<string, unknown> },
-  ): void {
-    const d = res?.data;
-    if (!d) {
-      console.log('[documents.ocr] recognize result', label, '(no data)');
-      return;
-    }
-    const text = typeof d['text'] === 'string' ? d['text'] : '';
-    const blocks = d['blocks'];
-    const blockSumm =
-      Array.isArray(blocks) && blocks.length
-        ? (blocks as { text?: string; confidence?: number }[])
-            .slice(0, 12)
-            .map((b, i) => ({
-              i,
-              confidence: b.confidence,
-              textPreview: (b.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 180),
-            }))
-        : [];
-    console.log('[documents.ocr] recognize result', label, {
-      jobId: res.jobId,
-      version: d['version'],
-      oem: d['oem'],
-      psm: d['psm'],
-      confidence: d['confidence'],
-      textLength: text.length,
-      textPreview: text.slice(0, 3500),
-      blockCount: Array.isArray(blocks) ? blocks.length : 0,
-      blocksPreview: blockSumm,
-      hasTsv: typeof d['tsv'] === 'string' && (d['tsv'] as string).length > 0,
-      hasHocr: typeof d['hocr'] === 'string' && (d['hocr'] as string).length > 0,
-      rotateRadians: d['rotateRadians'],
-    });
-  }
-
-  private async extractFromImageWithAdaptivePsm(
-    image: Buffer,
-    langs: string,
-  ): Promise<{
-    merged: Partial<ExtractionResult>;
-    previewText: string;
-    confidence: number | null;
-    psmsUsed: string[];
-  }> {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Tesseract = require('tesseract.js') as typeof import('tesseract.js');
-    const worker = await Tesseract.createWorker(langs, Tesseract.OEM.LSTM_ONLY, {});
-    const psms = [
-      Tesseract.PSM.AUTO,
-      Tesseract.PSM.SINGLE_COLUMN,
-      Tesseract.PSM.SPARSE_TEXT,
-      Tesseract.PSM.SINGLE_BLOCK,
-    ] as const;
-    let merged: Partial<ExtractionResult> = {};
-    let previewText = '';
-    let confidence: number | null = null;
-    const psmsUsed: string[] = [];
-    try {
-      for (const psm of psms) {
-        await worker.setParameters({
-          tessedit_pageseg_mode: psm,
-          preserve_interword_spaces: '1',
-        });
-        const res = await worker.recognize(image);
-        this.logTesseractRecognizeSnapshot(`langs=${langs} psm=${String(psm)}`, {
-          jobId: res.jobId,
-          data: res.data as unknown as Record<string, unknown>,
-        });
-        const t = res?.data?.text ?? '';
-        if (!previewText && t.trim()) {
-          previewText = t;
-        }
-        if (confidence === null && res?.data?.confidence != null) {
-          confidence = res.data.confidence;
-        }
-        const next = this.parseTextContent(t);
-        merged =
-          Object.keys(merged).length === 0
-            ? next
-            : this.mergePartialExtraction(merged, next);
-        psmsUsed.push(String(psm));
-        if ((merged.lineItems?.length ?? 0) >= this.OCR_LINE_ITEMS_STOP_AT) {
-          break;
-        }
-      }
-      return { merged, previewText, confidence, psmsUsed };
-    } finally {
-      await worker.terminate();
-    }
-  }
-
+  /**
+   * Image OCR via external Python OCRservice (EasyOCR). Tesseract.js path is disabled temporarily.
+   * Set OCR_SERVICE_URL (e.g. http://127.0.0.1:8000). Optional OCR_SERVICE_TIMEOUT_MS (default 120000).
+   */
   private async parseImage(buffer: Buffer): Promise<Partial<ExtractionResult>> {
-    const { buffer: ocrBuffer, applied: preprocessApplied, error: preprocessError } =
-      await preprocessImageForOcr(buffer);
+    const baseUrl = this.config.get<string>('OCR_SERVICE_URL')?.trim();
+    if (!baseUrl) {
+      const empty = this.parseTextContent('');
+      return {
+        ...empty,
+        rawExtractedData: {
+          ...(empty.rawExtractedData ?? {}),
+          source: 'image',
+          ocrError: 'OCR_SERVICE_URL not set',
+        },
+        ingestionNotes:
+          'Set OCR_SERVICE_URL to your Python OCRservice base URL (e.g. http://127.0.0.1:8000), start OCRservice, then re-upload.',
+      };
+    }
 
-    const initial = await this.extractFromImageWithAdaptivePsm(ocrBuffer, OCR_INITIAL_LANGS);
-    let text = initial.previewText;
-    let confidence = initial.confidence;
-    let parsed = initial.merged;
+    const timeoutMs = Number(this.config.get('OCR_SERVICE_TIMEOUT_MS') ?? 120_000);
+    const endpoint = `${baseUrl.replace(/\/$/, '')}/ocr/image`;
 
-    const refinedLang = detectTesseractRefinementLang(text);
-    let refinedApplied = false;
+    try {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(buffer)]), 'upload.bin');
 
-    if (refinedLang) {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        body: form,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      const bodyText = await res.text();
+      if (!res.ok) {
+        return {
+          ...this.parseTextContent(''),
+          rawExtractedData: {
+            source: 'image',
+            ocrServiceBase: baseUrl,
+            ocrHttpStatus: res.status,
+            ocrBodyPreview: bodyText.slice(0, 500),
+          },
+          ingestionNotes: `OCR service error (${res.status}). Is OCRservice running at ${baseUrl}?`,
+        };
+      }
+
+      let payload: {
+        fullText?: string;
+        confidence?: number | null;
+        lines?: Array<{ text: string; confidence: number }>;
+        engine?: string;
+      };
       try {
-        const refined = await this.extractFromImageWithAdaptivePsm(ocrBuffer, refinedLang);
-        const t2 = refined.previewText;
-        const c2 = refined.confidence;
-        const len1 = text.trim().length;
-        const len2 = t2.trim().length;
-        const longEnough = len2 >= 10;
-        const notMuchWorse = len1 === 0 || len2 >= len1 * 0.4 || len2 > len1;
-        if (longEnough && notMuchWorse) {
-          parsed = this.mergePartialExtraction(parsed, refined.merged);
-          text = t2;
-          confidence = c2 ?? confidence;
-          refinedApplied = true;
-        }
-      } catch {}
+        payload = JSON.parse(bodyText) as typeof payload;
+      } catch {
+        return {
+          ...this.parseTextContent(''),
+          rawExtractedData: {
+            source: 'image',
+            ocrServiceBase: baseUrl,
+            ocrError: 'invalid JSON from OCR service',
+            ocrBodyPreview: bodyText.slice(0, 300),
+          },
+          ingestionNotes: 'OCR service returned invalid JSON.',
+        };
+      }
+
+      const text = typeof payload.fullText === 'string' ? payload.fullText : '';
+      const confidence = payload.confidence ?? null;
+      const parsed = this.parseTextContent(text);
+
+      const parsedLineItemRows = parsed.lineItems?.length ?? 0;
+      console.log('[documents.parseImage] parsed table / line-item rows from OCR text', {
+        lineItemRows: parsedLineItemRows,
+      });
+
+      return {
+        ...parsed,
+        rawExtractedData: {
+          ...(parsed.rawExtractedData ?? {}),
+          source: 'image',
+          engine: payload.engine ?? 'easyocr',
+          confidence,
+          ocrServiceBase: baseUrl,
+          ocrLinesPreview: payload.lines?.slice(0, 40),
+        },
+        ingestionNotes: text.trim()
+          ? 'OCR (EasyOCR service) extracted text. Please review recognized values.'
+          : 'OCR did not detect enough text. Please review and enter data manually.',
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[documents.parseImage] OCR service request failed', msg);
+      return {
+        ...this.parseTextContent(''),
+        rawExtractedData: {
+          source: 'image',
+          ocrServiceBase: baseUrl,
+          ocrError: msg,
+        },
+        ingestionNotes: `OCR service unreachable or timed out (${timeoutMs}ms): ${msg}`,
+      };
     }
-
-    let englishFallbackApplied = false;
-    let englishTextPreview: string | undefined;
-    if (this.shouldRunEnglishOcrFallback(text, parsed)) {
-      try {
-        const eng = await this.extractFromImageWithAdaptivePsm(ocrBuffer, 'eng');
-        const engText = eng.previewText;
-        if (engText.replace(/\s+/g, ' ').trim().length >= 25) {
-          parsed = this.mergePartialExtraction(parsed, eng.merged);
-          englishFallbackApplied = true;
-          englishTextPreview = engText.slice(0, 1500);
-        }
-      } catch {}
-    }
-
-    const parsedLineItemRows = parsed.lineItems?.length ?? 0;
-    console.log('[documents.parseImage] parsed table / line-item rows from OCR text', {
-      lineItemRows: parsedLineItemRows,
-    });
-
-    return {
-      ...parsed,
-      rawExtractedData: {
-        ...(parsed.rawExtractedData ?? {}),
-        source: 'image',
-        confidence,
-        ocrImagePreprocessed: preprocessApplied,
-        ocrPreprocessError: preprocessError,
-        ocrInitialLangs: OCR_INITIAL_LANGS,
-        ocrPsmAdaptive: initial.psmsUsed.join(','),
-        ocrRefinedLang: refinedLang ?? undefined,
-        ocrRefinedApplied: refinedApplied,
-        ocrEnglishFallbackApplied: englishFallbackApplied,
-        ocrEnglishFallbackPreview: englishTextPreview,
-      },
-      ingestionNotes: text.trim()
-        ? refinedApplied
-          ? `OCR (${refinedLang}) refined after language detection. Please review recognized values.`
-          : 'OCR extracted text from image. Please review recognized values.'
-        : 'OCR did not detect enough text. Please review and enter data manually.',
-    };
-  }
-
-  private shouldRunEnglishOcrFallback(
-    ocrText: string,
-    parsed: Partial<ExtractionResult>,
-  ): boolean {
-    const compact = ocrText.replace(/\s+/g, ' ').trim();
-    if (compact.length < 40) {
-      return true;
-    }
-    const noTotals = parsed.total == null && parsed.subtotal == null;
-    const noLines = !parsed.lineItems?.length;
-    const weakMeta =
-      parsed.currency == null ||
-      parsed.issueDate == null ||
-      parsed.total == null ||
-      parsed.subtotal == null;
-    return (noTotals && noLines) || (noLines && weakMeta);
   }
 
   private pickRicherLineItems(a: ExtractedLineItem[], b: ExtractedLineItem[]): ExtractedLineItem[] {
