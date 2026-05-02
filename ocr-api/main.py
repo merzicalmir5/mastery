@@ -1,7 +1,8 @@
 """
 Lightweight OCR HTTP API for NestJS (EasyOCR).
 Run: uvicorn main:app --host 0.0.0.0 --port 8000
-Railway: set start command to uvicorn with $PORT; this file as root.
+Railway: uvicorn with $PORT. EasyOCR loads on first /ocr/image by default (saves RAM);
+set OCR_WARMUP_ON_STARTUP=1 to preload at boot if the host has enough memory.
 """
 
 from __future__ import annotations
@@ -615,12 +616,22 @@ def inject_implicit_quantity_before_each_rows(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm model on startup so first request is not 60s+
-    try:
-        _get_reader()
-        log.info("EasyOCR reader ready")
-    except Exception as e:
-        log.exception("failed to init EasyOCR: %s", e)
+    """
+    Avoid loading EasyOCR at startup: model + PyTorch spike RAM and get OOM-killed on small
+    hosts (e.g. Railway free). First POST /ocr/image may take longer while models load.
+    Set OCR_WARMUP_ON_STARTUP=1 to preload at boot when you have enough memory.
+    """
+    warmup = os.getenv("OCR_WARMUP_ON_STARTUP", "").lower() in ("1", "true", "yes")
+    if warmup:
+        try:
+            _get_reader()
+            log.info("EasyOCR reader ready (OCR_WARMUP_ON_STARTUP)")
+        except Exception as e:
+            log.exception("failed to init EasyOCR: %s", e)
+    else:
+        log.info(
+            "EasyOCR deferred to first /ocr/image (no OCR_WARMUP_ON_STARTUP); saves RAM at boot"
+        )
     yield
 
 
