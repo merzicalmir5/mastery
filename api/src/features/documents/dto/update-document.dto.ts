@@ -31,6 +31,11 @@ export class UpdateDocumentLineItemDto {
   @IsNumber()
   @Min(0)
   lineTotal!: number;
+
+  /** Display label (e.g. each); persisted in DocumentLineItem.rawData.unitLabel */
+  @IsOptional()
+  @IsString()
+  unitLabel?: string;
 }
 
 export class UpdateDocumentDto {

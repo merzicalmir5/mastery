@@ -136,11 +136,13 @@ export class DocumentDetailComponent {
   }
 
   private lineGroup(li?: LineItem): FormGroup {
+    const qty = li?.quantity ?? 1;
+    const lt = li?.lineTotal ?? 0;
     return this.fb.nonNullable.group({
       description: [li?.description ?? ''],
-      quantity: [li?.quantity ?? 1],
-      unitPrice: [li?.unitPrice ?? 0],
-      lineTotal: [li?.lineTotal ?? 0],
+      quantity: [qty],
+      unitLabel: [li?.unitLabel ?? ''],
+      lineTotal: [lt],
     });
   }
 
@@ -182,12 +184,19 @@ export class DocumentDetailComponent {
   collectLineItems(): DocumentLineItemPatch[] {
     return this.lineItemsArray.controls
       .map((ctrl) => ctrl.getRawValue() as Record<string, unknown>)
-      .map((v) => ({
-        description: String(v['description'] ?? '').trim(),
-        quantity: Number(v['quantity']),
-        unitPrice: Number(v['unitPrice']),
-        lineTotal: Number(v['lineTotal']),
-      }))
+      .map((v) => {
+        const qty = Number(v['quantity']);
+        const lt = Number(v['lineTotal']);
+        const unitPrice = qty > 0 ? lt / qty : 0;
+        const unitLabel = String(v['unitLabel'] ?? '').trim();
+        return {
+          description: String(v['description'] ?? '').trim(),
+          quantity: qty,
+          unitPrice,
+          lineTotal: lt,
+          ...(unitLabel ? { unitLabel } : {}),
+        };
+      })
       .filter((li) => li.description.length > 0);
   }
 

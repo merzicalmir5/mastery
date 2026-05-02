@@ -188,16 +188,78 @@ export class DocumentsService {
 
   async findAllForUser(
     user: JwtUser,
-    params: { page: number; pageSize: number; status?: string },
+    params: {
+      page: number;
+      pageSize: number;
+      status?: string;
+      q?: string;
+      fileName?: string;
+      documentKind?: string;
+      updatedFrom?: string;
+      updatedTo?: string;
+      issueFilter?: string;
+    },
   ): Promise<PaginatedResult<DocumentApiRow>> {
     const page = Number.isFinite(params.page) ? Math.max(1, Math.trunc(params.page)) : 1;
     const pageSizeRaw = Number.isFinite(params.pageSize) ? Math.trunc(params.pageSize) : 10;
     const pageSize = Math.min(100, Math.max(1, pageSizeRaw));
     const status = this.mapStatusFilter(params.status);
-    const where: Prisma.DocumentWhereInput = {
-      companyName: user.companyName,
-      ...(status ? { status } : {}),
-    };
+    const documentType = this.mapDocumentKindFilter(params.documentKind);
+    const issueWhere = this.mapIssueFilter(params.issueFilter);
+
+    const andConditions: Prisma.DocumentWhereInput[] = [{ companyName: user.companyName }];
+    if (status) {
+      andConditions.push({ status });
+    }
+    
+    if (documentType === DocumentType.INVOICE) {
+      andConditions.push({
+        OR: [{ documentType: DocumentType.INVOICE }, { documentType: null }],
+      });
+    } else if (documentType === DocumentType.PURCHASE_ORDER) {
+      andConditions.push({ documentType: DocumentType.PURCHASE_ORDER });
+    }
+    const filePart = params.fileName?.trim();
+    if (filePart) {
+      andConditions.push({ fileName: { contains: filePart, mode: 'insensitive' } });
+    }
+
+    const q = params.q?.trim();
+    if (q) {
+      andConditions.push({
+        OR: [
+          { fileName: { contains: q, mode: 'insensitive' } },
+          { supplierName: { contains: q, mode: 'insensitive' } },
+          { documentNumber: { contains: q, mode: 'insensitive' } },
+          { currency: { contains: q, mode: 'insensitive' } },
+          {
+            validationIssues: {
+              some: { message: { contains: q, mode: 'insensitive' } },
+            },
+          },
+        ],
+      });
+    }
+
+    const from = this.parseDateParam(params.updatedFrom);
+    const to = this.parseDateParam(params.updatedTo);
+    const updatedFilter: { gte?: Date; lte?: Date } = {};
+    if (from) {
+      updatedFilter.gte = from;
+    }
+    if (to) {
+      updatedFilter.lte = to;
+    }
+    if (Object.keys(updatedFilter).length > 0) {
+      andConditions.push({ updatedAt: updatedFilter });
+    }
+
+    if (issueWhere) {
+      andConditions.push(issueWhere);
+    }
+
+    const where: Prisma.DocumentWhereInput =
+      andConditions.length === 1 ? andConditions[0]! : { AND: andConditions };
     const skip = (page - 1) * pageSize;
 
     const [rows, total] = await this.prisma.$transaction([
@@ -367,6 +429,10 @@ export class DocumentsService {
               quantity: new Prisma.Decimal(li.quantity),
               unitPrice: new Prisma.Decimal(li.unitPrice),
               lineTotal: new Prisma.Decimal(li.lineTotal),
+              rawData:
+                li.unitLabel != null && String(li.unitLabel).trim() !== ''
+                  ? ({ unitLabel: String(li.unitLabel).trim() } as Prisma.InputJsonValue)
+                  : undefined,
             })),
           });
         }
@@ -424,13 +490,30 @@ export class DocumentsService {
             quantity: li.quantity,
             unitPrice: li.unitPrice,
             lineTotal: li.lineTotal,
+            ...(li.unitLabel != null && String(li.unitLabel).trim() !== ''
+              ? { unitLabel: String(li.unitLabel).trim() }
+              : {}),
           }))
-        : doc.lineItems.map((li) => ({
-            description: li.description,
-            quantity: Number(li.quantity),
-            unitPrice: Number(li.unitPrice),
-            lineTotal: Number(li.lineTotal),
-          }));
+        : doc.lineItems.map((li) => {
+            let unitLabel: string | undefined;
+            const rd = li.rawData;
+            if (
+              rd !== null &&
+              typeof rd === 'object' &&
+              !Array.isArray(rd) &&
+              'unitLabel' in rd &&
+              typeof (rd as { unitLabel?: unknown }).unitLabel === 'string'
+            ) {
+              unitLabel = (rd as { unitLabel: string }).unitLabel;
+            }
+            return {
+              description: li.description,
+              quantity: Number(li.quantity),
+              unitPrice: Number(li.unitPrice),
+              lineTotal: Number(li.lineTotal),
+              ...(unitLabel ? { unitLabel } : {}),
+            };
+          });
     return {
       documentType: dto.documentType ?? doc.documentType,
       supplierName: dto.supplierName ?? doc.supplierName,
@@ -459,6 +542,10 @@ export class DocumentsService {
       quantity: li.quantity,
       unitPrice: li.unitPrice,
       lineTotal: li.lineTotal,
+      rawData:
+        li.unitLabel != null && li.unitLabel.trim() !== ''
+          ? ({ unitLabel: li.unitLabel.trim() } as Prisma.InputJsonValue)
+          : undefined,
     }));
 
     await this.prisma.$transaction(async (tx) => {
@@ -551,6 +638,49 @@ export class DocumentsService {
     return mapped;
   }
 
+  private mapDocumentKindFilter(kind?: string): DocumentType | undefined {
+    if (!kind?.trim()) {
+      return undefined;
+    }
+    const normalized = kind.trim().toLowerCase();
+    const map: Record<string, DocumentType> = {
+      invoice: DocumentType.INVOICE,
+      purchase_order: DocumentType.PURCHASE_ORDER,
+    };
+    const mapped = map[normalized];
+    if (!mapped) {
+      throw new BadRequestException('Invalid documentKind filter.');
+    }
+    return mapped;
+  }
+
+  private mapIssueFilter(
+    raw?: string,
+  ): Prisma.DocumentWhereInput | undefined {
+    const v = raw?.trim().toLowerCase();
+    if (!v) {
+      return undefined;
+    }
+    if (v === 'has') {
+      return { validationIssues: { some: {} } };
+    }
+    if (v === 'none') {
+      return { validationIssues: { none: {} } };
+    }
+    throw new BadRequestException('Invalid issueFilter (use has or none).');
+  }
+
+  private parseDateParam(iso?: string): Date | undefined {
+    if (!iso?.trim()) {
+      return undefined;
+    }
+    const d = new Date(iso.trim());
+    if (Number.isNaN(d.getTime())) {
+      throw new BadRequestException('Invalid updatedFrom / updatedTo datetime.');
+    }
+    return d;
+  }
+
   private toApiRow(
     doc: Document & {
       lineItems: DocumentLineItem[];
@@ -580,14 +710,28 @@ export class DocumentsService {
       reviewedAt: doc.reviewedAt?.toISOString() ?? null,
       createdAt: doc.createdAt.toISOString(),
       updatedAt: doc.updatedAt.toISOString(),
-      lineItems: doc.lineItems.map((li) => ({
-        id: li.id,
-        itemOrder: li.itemOrder,
-        description: li.description,
-        quantity: Number(li.quantity),
-        unitPrice: Number(li.unitPrice),
-        lineTotal: Number(li.lineTotal),
-      })),
+      lineItems: doc.lineItems.map((li) => {
+        let unitLabel: string | null = null;
+        const rd = li.rawData;
+        if (
+          rd !== null &&
+          typeof rd === 'object' &&
+          !Array.isArray(rd) &&
+          'unitLabel' in rd &&
+          typeof (rd as { unitLabel?: unknown }).unitLabel === 'string'
+        ) {
+          unitLabel = (rd as { unitLabel: string }).unitLabel;
+        }
+        return {
+          id: li.id,
+          itemOrder: li.itemOrder,
+          description: li.description,
+          quantity: Number(li.quantity),
+          unitPrice: Number(li.unitPrice),
+          lineTotal: Number(li.lineTotal),
+          unitLabel,
+        };
+      }),
       validationIssues: doc.validationIssues.map((v) => ({
         id: v.id,
         fieldPath: v.fieldPath,

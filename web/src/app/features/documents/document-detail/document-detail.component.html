@@ -205,6 +205,13 @@
         </p>
 
         <div class="doc-detail__lines-edit" formArrayName="lineItems">
+          <div class="doc-detail__line-row doc-detail__line-row--header" aria-hidden="true">
+            <span class="doc-detail__line-header-cell">Stavka</span>
+            <span class="doc-detail__line-header-cell">Quantity</span>
+            <span class="doc-detail__line-header-cell">Unit</span>
+            <span class="doc-detail__line-header-cell">Total</span>
+            <span></span>
+          </div>
           @for (ctrl of lineItemsArray.controls; track $index; let i = $index) {
             <div class="doc-detail__line-row" [formGroupName]="i">
               <mat-form-field
@@ -229,7 +236,7 @@
                 appearance="outline"
               >
                 <mat-label>Unit</mat-label>
-                <input matInput type="number" step="0.01" formControlName="unitPrice" />
+                <input matInput formControlName="unitLabel" placeholder="e.g. each" />
               </mat-form-field>
               <mat-form-field
                 class="doc-detail__line-field"

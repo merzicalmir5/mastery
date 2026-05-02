@@ -66,8 +66,24 @@ export class DocumentsController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('pageSize', new DefaultValuePipe(10), ParseIntPipe) pageSize: number,
     @Query('status') status?: string,
+    @Query('q') q?: string,
+    @Query('fileName') fileName?: string,
+    @Query('documentKind') documentKind?: string,
+    @Query('updatedFrom') updatedFrom?: string,
+    @Query('updatedTo') updatedTo?: string,
+    @Query('issueFilter') issueFilter?: string,
   ) {
-    return this.documentsService.findAllForUser(user, { page, pageSize, status });
+    return this.documentsService.findAllForUser(user, {
+      page,
+      pageSize,
+      status,
+      q,
+      fileName,
+      documentKind,
+      updatedFrom,
+      updatedTo,
+      issueFilter,
+    });
   }
 
   @Get(':id/file')

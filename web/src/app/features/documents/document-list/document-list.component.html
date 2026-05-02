@@ -1,6 +1,100 @@
 <section class="doc-list">
   <p class="doc-list__subtitle">Documents for your company from the API.</p>
 
+  <div class="doc-list__filters">
+    <mat-form-field appearance="outline" class="doc-list__filter-search" subscriptSizing="dynamic">
+      <mat-label>Search everything</mat-label>
+      <input
+        matInput
+        type="search"
+        autocomplete="off"
+        [value]="filterSearchInput()"
+        (input)="onSearchTyping($event)"
+        placeholder="File, supplier, number, currency, issue text…"
+      />
+    </mat-form-field>
+
+    <div class="doc-list__filter-grid">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>File name</mat-label>
+        <input
+          matInput
+          type="text"
+          autocomplete="off"
+          [value]="filterFileName()"
+          (input)="filterFileName.set(($any($event.target)).value)"
+          (blur)="onFiltersChange()"
+          (keyup.enter)="onFiltersChange()"
+          placeholder="Contains…"
+        />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Type</mat-label>
+        <mat-select
+          [value]="filterKind()"
+          (selectionChange)="filterKind.set($event.value); onFiltersChange()"
+        >
+          <mat-option value="">Any</mat-option>
+          <mat-option value="invoice">Invoice</mat-option>
+          <mat-option value="purchase_order">PO</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      @if (showStatusFilter()) {
+        <mat-form-field appearance="outline" subscriptSizing="dynamic">
+          <mat-label>Status</mat-label>
+          <mat-select
+            [value]="filterStatus()"
+            (selectionChange)="filterStatus.set($event.value); onFiltersChange()"
+          >
+            <mat-option value="">Any</mat-option>
+            <mat-option value="uploaded">Uploaded</mat-option>
+            <mat-option value="needs_review">Needs review</mat-option>
+            <mat-option value="validated">Validated</mat-option>
+            <mat-option value="rejected">Rejected</mat-option>
+          </mat-select>
+        </mat-form-field>
+      }
+
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Issues</mat-label>
+        <mat-select
+          [value]="filterIssues()"
+          (selectionChange)="filterIssues.set($event.value); onFiltersChange()"
+        >
+          <mat-option value="">Any</mat-option>
+          <mat-option value="has">Has issues</mat-option>
+          <mat-option value="none">No issues</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Updated from</mat-label>
+        <input
+          matInput
+          type="datetime-local"
+          [value]="filterUpdatedFrom()"
+          (change)="filterUpdatedFrom.set(($any($event.target)).value); onFiltersChange()"
+        />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" subscriptSizing="dynamic">
+        <mat-label>Updated to</mat-label>
+        <input
+          matInput
+          type="datetime-local"
+          [value]="filterUpdatedTo()"
+          (change)="filterUpdatedTo.set(($any($event.target)).value); onFiltersChange()"
+        />
+      </mat-form-field>
+
+      <div class="doc-list__filter-actions">
+        <button mat-stroked-button type="button" (click)="resetFilters()">Reset filters</button>
+      </div>
+    </div>
+  </div>
+
   @if (rows().length === 0) {
     <div class="doc-list__empty">No documents in this view.</div>
   } @else {
