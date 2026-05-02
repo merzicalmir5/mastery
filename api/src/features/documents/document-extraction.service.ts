@@ -219,7 +219,6 @@ export class DocumentExtractionService {
     const ltIdx = this.findCsvColumnAny(header, CSV_COLUMN_ALIASES.lineTotal);
     const hasLineColumns = dIdx >= 0 && qIdx >= 0 && uIdx >= 0;
 
-    /** Column-mapped rows plus heuristic rows (same start row as structured data); deduped. */
     const mergeStructuredAndLooseRows = (
       structured: ExtractedLineItem[],
       looseStartRow: number,
@@ -337,10 +336,6 @@ export class DocumentExtractionService {
     return lineItems;
   }
 
-  /**
-   * Rows whose last 2–3 cells parse as numbers → quantity, unit price, optional line total;
-   * leading cells form the description (invoice-style lines without a typed header row).
-   */
   private extractLooseCsvLineItems(rows: string[][], startRow: number): ExtractedLineItem[] {
     const out: ExtractedLineItem[] = [];
     for (let r = startRow; r < rows.length; r++) {
@@ -530,9 +525,6 @@ export class DocumentExtractionService {
     };
   }
 
-  /**
-   * Used by PDF, TXT, images (OCR): whitespace-separated lines, comma/tab/semicolon rows — merged and deduped.
-   */
   private extractAllLooseLineItemsFromText(t: string): ExtractedLineItem[] {
     return this.dedupeLineItems([
       ...this.parseLoosePdfLineRows(t),
@@ -567,7 +559,6 @@ export class DocumentExtractionService {
     return out;
   }
 
-  /** Comma-separated quantity/price/total tails (pasted CSV, export). */
   private parseLooseCommaSeparatedLineRows(t: string): ExtractedLineItem[] {
     const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const out: ExtractedLineItem[] = [];
@@ -583,7 +574,6 @@ export class DocumentExtractionService {
     return out;
   }
 
-  /** Tab- or semicolon-separated lines (Excel paste, EU CSV in text/PDF). */
   private parseLooseTabSemicolonLineRows(t: string): ExtractedLineItem[] {
     const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const out: ExtractedLineItem[] = [];
