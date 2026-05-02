@@ -638,6 +638,17 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root():
+    """Browser hits / on deploy smoke checks; real OCR is POST /ocr/image."""
+    return {
+        "service": "mastery-ocr-api",
+        "docs": "/docs",
+        "health": "/health",
+        "ocr": "POST /ocr/image (multipart file)",
+    }
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "engine": "easyocr"}

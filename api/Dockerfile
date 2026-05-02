@@ -25,4 +25,4 @@ COPY --from=build /app/dist ./dist
 COPY prisma ./prisma
 
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
+CMD ["sh", "-c", "set -e; echo '[api] prisma migrate deploy'; npx prisma migrate deploy; echo '[api] starting Nest (node dist/main)'; exec node dist/main"]
