@@ -1,0 +1,11 @@
+.git
+**/.env
+**/.env.*
+**/node_modules
+web
+**/*.md
+**/.angular
+**/dist
+api/coverage
+api/logs
+api/uploads
