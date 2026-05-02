@@ -17,7 +17,7 @@ services:
       timeout: 5s
       retries: 20
 
-  # Image → text/JSON for document pipeline (FastAPI + EasyOCR). Nest uses OCR_SERVICE_URL.
+  # Image → text/JSON (FastAPI; default Tesseract). Optional: build args INSTALL_EASYOCR=true + env OCR_ENGINE=easyocr.
   ocr-api:
     build:
       context: ./ocr-api
