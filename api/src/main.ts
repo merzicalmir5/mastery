@@ -35,6 +35,10 @@ async function bootstrap() {
     `[bootstrap] listening on 0.0.0.0:${listenPort} (process.env.PORT=${JSON.stringify(process.env.PORT)})`,
   );
 
+  app.getHttpAdapter().get('/', (_req, res) => {
+    res.redirect('/api/docs');
+  });
+
   try {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Mastery API')
@@ -54,9 +58,6 @@ async function bootstrap() {
     const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
     swaggerDocument.security = [{ 'access-token': [] }];
     SwaggerModule.setup('api/docs', app, swaggerDocument);
-    app.getHttpAdapter().get('/', (_req, res) => {
-      res.redirect('/api/docs');
-    });
     console.log('[bootstrap] Swagger mounted at /api/docs');
   } catch (err: unknown) {
     console.error('[bootstrap] Swagger setup failed (HTTP API still up)', err);
