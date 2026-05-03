@@ -38,8 +38,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ocr-api:
-        condition: service_started
     environment:
       PORT: 3000
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/mastery?schema=public
@@ -51,8 +49,9 @@ services:
       FRONTEND_BASE_URL: http://localhost:4200
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       SENDGRID_FROM_EMAIL: ${SENDGRID_FROM_EMAIL:-no-reply@mastery.local}
-      OCR_SERVICE_URL: http://ocr-api:8000
-      OCR_SERVICE_TIMEOUT_MS: ${OCR_SERVICE_TIMEOUT_MS:-120000}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_OCR_MODEL: ${MISTRAL_OCR_MODEL:-mistral-ocr-latest}
+      MISTRAL_OCR_TIMEOUT_MS: ${MISTRAL_OCR_TIMEOUT_MS:-120000}
     ports:
       - "3000:3000"
     volumes:
