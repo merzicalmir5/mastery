@@ -11,7 +11,6 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-/** One line on PATCH; sent as full replacement list when editing line items. */
 export class UpdateDocumentLineItemDto {
   @IsString()
   @MinLength(1)
@@ -32,7 +31,6 @@ export class UpdateDocumentLineItemDto {
   @Min(0)
   lineTotal!: number;
 
-  /** Display label (e.g. each); persisted in DocumentLineItem.rawData.unitLabel */
   @IsOptional()
   @IsString()
   unitLabel?: string;
@@ -81,7 +79,6 @@ export class UpdateDocumentDto {
   @Min(0)
   total?: number;
 
-  /** When set (save or confirm), replaces all line items for the document. Omit to leave lines unchanged. */
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(500)
@@ -89,7 +86,6 @@ export class UpdateDocumentDto {
   @Type(() => UpdateDocumentLineItemDto)
   lineItems?: UpdateDocumentLineItemDto[];
 
-  /** Save edits only | confirm as validated | reject */
   @IsOptional()
   @IsEnum(['save', 'confirm', 'reject'])
   action?: 'save' | 'confirm' | 'reject';

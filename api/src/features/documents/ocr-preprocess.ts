@@ -1,9 +1,5 @@
 import sharp from 'sharp';
 
-/**
- * Normalizes scans/photos for Tesseract: grayscale, contrast, sharpen, binarize.
- * Falls back to the original buffer if Sharp rejects the input.
- */
 export async function preprocessImageForOcr(input: Buffer): Promise<{
   buffer: Buffer;
   applied: boolean;

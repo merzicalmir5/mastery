@@ -97,7 +97,6 @@ export class MistralOcrService {
       if (fmt === 'tiff') return 'image/tiff';
       if (fmt === 'avif') return 'image/avif';
     } catch {
-      // fall through
     }
     return 'application/octet-stream';
   }

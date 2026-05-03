@@ -6,7 +6,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   Document,
-  DocumentLineItem,
   DocumentSourceType,
   DocumentStatus,
   DocumentType,
@@ -22,6 +21,14 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { DocumentExtractionService } from './document-extraction.service';
 import { DocumentValidationService } from './document-validation.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
+import {
+  buildLineItemsDataFromEditorPatch,
+  normalizedItemsFromLineItemsData,
+} from './line-items-data';
+
+type DocumentUpdatePayload = Prisma.DocumentUpdateInput & {
+  lineItemsData?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+};
 
 export type DocumentApiRow = {
   id: string;
@@ -46,6 +53,7 @@ export type DocumentApiRow = {
   reviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  lineItemsData: unknown | null;
   lineItems: {
     id: string;
     itemOrder: number;
@@ -53,6 +61,7 @@ export type DocumentApiRow = {
     quantity: number;
     unitPrice: number;
     lineTotal: number;
+    unitLabel?: string | null;
   }[];
   validationIssues: {
     id: string;
@@ -132,7 +141,6 @@ export class DocumentsService {
 
     const originalName = path.basename(file.originalname);
     let created: Document & {
-      lineItems: DocumentLineItem[];
       validationIssues: DocumentValidationIssue[];
     };
     try {
@@ -148,7 +156,6 @@ export class DocumentsService {
           status: DocumentStatus.UPLOADED,
         },
         include: {
-          lineItems: { orderBy: { itemOrder: 'asc' } },
           validationIssues: { orderBy: { createdAt: 'asc' } },
         },
       });
@@ -266,7 +273,6 @@ export class DocumentsService {
       this.prisma.document.findMany({
         where,
         include: {
-          lineItems: { orderBy: { itemOrder: 'asc' } },
           validationIssues: { orderBy: { createdAt: 'asc' } },
         },
         orderBy: { updatedAt: 'desc' },
@@ -289,7 +295,6 @@ export class DocumentsService {
     const rows = await this.prisma.document.findMany({
       where: { companyName: user.companyName },
       include: {
-        lineItems: { orderBy: { itemOrder: 'asc' } },
         validationIssues: { orderBy: { createdAt: 'asc' } },
       },
       orderBy: { updatedAt: 'desc' },
@@ -301,7 +306,6 @@ export class DocumentsService {
     const row = await this.prisma.document.findFirst({
       where: { id, companyName: user.companyName },
       include: {
-        lineItems: { orderBy: { itemOrder: 'asc' } },
         validationIssues: { orderBy: { createdAt: 'asc' } },
       },
     });
@@ -311,10 +315,6 @@ export class DocumentsService {
     return this.toApiRow(row);
   }
 
-  /**
-   * Opens the stored upload for streaming (same company as JWT).
-   * Caller must pipe the stream to the HTTP response and handle errors.
-   */
   async getFileStream(
     id: string,
     user: JwtUser,
@@ -339,7 +339,6 @@ export class DocumentsService {
     return { stream, contentType, fileName: doc.fileName };
   }
 
-  /** Value safe inside `Content-Disposition: ... filename="..."` (ASCII, no quotes or newlines). */
   dispositionFilename(name: string): string {
     const s = name.replace(/[\r\n"]/g, '_').trim() || 'document';
     return s.length > 200 ? s.slice(0, 200) : s;
@@ -364,7 +363,6 @@ export class DocumentsService {
   async update(id: string, dto: UpdateDocumentDto, user: JwtUser): Promise<DocumentApiRow> {
     const existing = await this.prisma.document.findFirst({
       where: { id, companyName: user.companyName },
-      include: { lineItems: { orderBy: { itemOrder: 'asc' } } },
     });
     if (!existing) {
       throw new NotFoundException('Document not found.');
@@ -414,29 +412,25 @@ export class DocumentsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
+      const patch = { ...data } as DocumentUpdatePayload;
+      if (action !== 'reject' && dto.lineItems !== undefined) {
+        patch.lineItemsData =
+          dto.lineItems.length > 0
+            ? (buildLineItemsDataFromEditorPatch(
+                dto.lineItems.map((li) => ({
+                  description: li.description.trim(),
+                  quantity: li.quantity,
+                  unitPrice: li.unitPrice,
+                  lineTotal: li.lineTotal,
+                  unitLabel: li.unitLabel,
+                })),
+              ) as Prisma.InputJsonValue)
+            : Prisma.JsonNull;
+      }
       await tx.document.update({
         where: { id },
-        data,
+        data: patch as Prisma.DocumentUpdateInput,
       });
-      if (action !== 'reject' && dto.lineItems !== undefined) {
-        await tx.documentLineItem.deleteMany({ where: { documentId: id } });
-        if (dto.lineItems.length > 0) {
-          await tx.documentLineItem.createMany({
-            data: dto.lineItems.map((li, i) => ({
-              documentId: id,
-              itemOrder: i,
-              description: li.description.trim(),
-              quantity: new Prisma.Decimal(li.quantity),
-              unitPrice: new Prisma.Decimal(li.unitPrice),
-              lineTotal: new Prisma.Decimal(li.lineTotal),
-              rawData:
-                li.unitLabel != null && String(li.unitLabel).trim() !== ''
-                  ? ({ unitLabel: String(li.unitLabel).trim() } as Prisma.InputJsonValue)
-                  : undefined,
-            })),
-          });
-        }
-      }
     });
 
     if (action === 'save' || action === 'confirm') {
@@ -463,10 +457,7 @@ export class DocumentsService {
     }
   }
 
-  private buildFinalSnapshot(
-    doc: Document & { lineItems: DocumentLineItem[] },
-    dto: UpdateDocumentDto,
-  ): Record<string, unknown> {
+  private buildFinalSnapshot(doc: Document, dto: UpdateDocumentDto): Record<string, unknown> {
     const sub =
       dto.subtotal !== undefined ? dto.subtotal : doc.subtotal != null ? Number(doc.subtotal) : null;
     const tax = dto.tax !== undefined ? dto.tax : doc.tax != null ? Number(doc.tax) : null;
@@ -494,26 +485,15 @@ export class DocumentsService {
               ? { unitLabel: String(li.unitLabel).trim() }
               : {}),
           }))
-        : doc.lineItems.map((li) => {
-            let unitLabel: string | undefined;
-            const rd = li.rawData;
-            if (
-              rd !== null &&
-              typeof rd === 'object' &&
-              !Array.isArray(rd) &&
-              'unitLabel' in rd &&
-              typeof (rd as { unitLabel?: unknown }).unitLabel === 'string'
-            ) {
-              unitLabel = (rd as { unitLabel: string }).unitLabel;
-            }
-            return {
-              description: li.description,
-              quantity: Number(li.quantity),
-              unitPrice: Number(li.unitPrice),
-              lineTotal: Number(li.lineTotal),
-              ...(unitLabel ? { unitLabel } : {}),
-            };
-          });
+        : normalizedItemsFromLineItemsData(
+            (doc as { lineItemsData?: unknown }).lineItemsData,
+          ).map((li) => ({
+            description: li.description,
+            quantity: li.quantity,
+            unitPrice: li.unitPrice,
+            lineTotal: li.lineTotal,
+            ...(li.unitLabel ? { unitLabel: li.unitLabel } : {}),
+          }));
     return {
       documentType: dto.documentType ?? doc.documentType,
       supplierName: dto.supplierName ?? doc.supplierName,
@@ -535,50 +515,38 @@ export class DocumentsService {
     sourceType: DocumentSourceType,
   ): Promise<void> {
     const extracted = await this.extraction.extractFromFile(absolutePath, sourceType);
-    const lineCreates = extracted.lineItems.map((li, i) => ({
-      documentId: id,
-      itemOrder: i,
-      description: li.description,
-      quantity: li.quantity,
-      unitPrice: li.unitPrice,
-      lineTotal: li.lineTotal,
-      rawData:
-        li.unitLabel != null && li.unitLabel.trim() !== ''
-          ? ({ unitLabel: li.unitLabel.trim() } as Prisma.InputJsonValue)
-          : undefined,
-    }));
+    const lineItemsJson =
+      extracted.lineItemsData != null
+        ? (extracted.lineItemsData as Prisma.InputJsonValue)
+        : Prisma.JsonNull;
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.documentLineItem.deleteMany({ where: { documentId: id } });
-      await tx.document.update({
-        where: { id },
-        data: {
-          documentType: extracted.documentType ?? undefined,
-          supplierName: extracted.supplierName,
-          documentNumber: extracted.documentNumber,
-          issueDate: extracted.issueDate,
-          dueDate: extracted.dueDate,
-          currency: extracted.currency,
-          subtotal:
-            extracted.subtotal !== null && extracted.subtotal !== undefined
-              ? new Prisma.Decimal(extracted.subtotal)
-              : null,
-          tax:
-            extracted.tax !== null && extracted.tax !== undefined
-              ? new Prisma.Decimal(extracted.tax)
-              : null,
-          total:
-            extracted.total !== null && extracted.total !== undefined
-              ? new Prisma.Decimal(extracted.total)
-              : null,
-          rawExtractedData: extracted.rawExtractedData as Prisma.InputJsonValue,
-          ingestionNotes: extracted.ingestionNotes,
-          status: DocumentStatus.NEEDS_REVIEW,
-        },
-      });
-      if (lineCreates.length) {
-        await tx.documentLineItem.createMany({ data: lineCreates });
-      }
+    const ingestPayload: DocumentUpdatePayload = {
+      documentType: extracted.documentType ?? undefined,
+      supplierName: extracted.supplierName,
+      documentNumber: extracted.documentNumber,
+      issueDate: extracted.issueDate,
+      dueDate: extracted.dueDate,
+      currency: extracted.currency,
+      subtotal:
+        extracted.subtotal !== null && extracted.subtotal !== undefined
+          ? new Prisma.Decimal(extracted.subtotal)
+          : null,
+      tax:
+        extracted.tax !== null && extracted.tax !== undefined
+          ? new Prisma.Decimal(extracted.tax)
+          : null,
+      total:
+        extracted.total !== null && extracted.total !== undefined
+          ? new Prisma.Decimal(extracted.total)
+          : null,
+      rawExtractedData: extracted.rawExtractedData as Prisma.InputJsonValue,
+      lineItemsData: lineItemsJson,
+      ingestionNotes: extracted.ingestionNotes,
+      status: DocumentStatus.NEEDS_REVIEW,
+    };
+    await this.prisma.document.update({
+      where: { id },
+      data: ingestPayload as Prisma.DocumentUpdateInput,
     });
 
     await this.validation.run(id);
@@ -683,10 +651,11 @@ export class DocumentsService {
 
   private toApiRow(
     doc: Document & {
-      lineItems: DocumentLineItem[];
       validationIssues: DocumentValidationIssue[];
     },
   ): DocumentApiRow {
+    const lid = (doc as { lineItemsData?: unknown }).lineItemsData;
+    const normalized = normalizedItemsFromLineItemsData(lid);
     return {
       id: doc.id,
       companyName: doc.companyName,
@@ -710,28 +679,16 @@ export class DocumentsService {
       reviewedAt: doc.reviewedAt?.toISOString() ?? null,
       createdAt: doc.createdAt.toISOString(),
       updatedAt: doc.updatedAt.toISOString(),
-      lineItems: doc.lineItems.map((li) => {
-        let unitLabel: string | null = null;
-        const rd = li.rawData;
-        if (
-          rd !== null &&
-          typeof rd === 'object' &&
-          !Array.isArray(rd) &&
-          'unitLabel' in rd &&
-          typeof (rd as { unitLabel?: unknown }).unitLabel === 'string'
-        ) {
-          unitLabel = (rd as { unitLabel: string }).unitLabel;
-        }
-        return {
-          id: li.id,
-          itemOrder: li.itemOrder,
-          description: li.description,
-          quantity: Number(li.quantity),
-          unitPrice: Number(li.unitPrice),
-          lineTotal: Number(li.lineTotal),
-          unitLabel,
-        };
-      }),
+      lineItemsData: lid ?? null,
+      lineItems: normalized.map((li, i) => ({
+        id: `${doc.id}-line-${i}`,
+        itemOrder: i,
+        description: li.description,
+        quantity: li.quantity,
+        unitPrice: li.unitPrice,
+        lineTotal: li.lineTotal,
+        unitLabel: li.unitLabel ?? null,
+      })),
       validationIssues: doc.validationIssues.map((v) => ({
         id: v.id,
         fieldPath: v.fieldPath,

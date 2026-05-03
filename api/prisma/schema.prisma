@@ -100,6 +100,8 @@ model Document {
   total             Decimal?              @db.Decimal(18, 2)
   status            DocumentStatus        @default(UPLOADED)
   rawExtractedData  Json?
+  /** OCR/editor line-item table: columns, rows (dynamic keys), normalizedItems for validation/UI */
+  lineItemsData     Json?
   finalData         Json?
   ingestionNotes    String?
   uploadedByUserId  String?
@@ -107,7 +109,6 @@ model Document {
   reviewedAt        DateTime?
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
-  lineItems         DocumentLineItem[]
   validationIssues  DocumentValidationIssue[]
   revisions         DocumentRevision[]
   uploadedBy        User?                 @relation("DocumentsUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
@@ -117,23 +118,6 @@ model Document {
   @@index([companyName, documentNumber])
   @@index([uploadedByUserId])
   @@index([reviewedByUserId])
-}
-
-model DocumentLineItem {
-  id             String    @id @default(uuid())
-  documentId     String
-  itemOrder      Int
-  description    String
-  quantity       Decimal   @db.Decimal(18, 4)
-  unitPrice      Decimal   @db.Decimal(18, 4)
-  lineTotal      Decimal   @db.Decimal(18, 2)
-  rawData        Json?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  document       Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  @@index([documentId])
-  @@unique([documentId, itemOrder])
 }
 
 model DocumentValidationIssue {

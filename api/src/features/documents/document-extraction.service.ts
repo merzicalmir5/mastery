@@ -20,6 +20,10 @@ import {
   pickMeta,
 } from './document-i18n';
 import { MistralOcrService } from './mistral-ocr.service';
+import {
+  type LineItemsDataV1,
+  slugifyLineItemColumnKeys,
+} from './line-items-data';
 export type ExtractedLineItem = {
   description: string;
   quantity: number;
@@ -39,11 +43,22 @@ export type ExtractionResult = {
   tax: number | null;
   total: number | null;
   lineItems: ExtractedLineItem[];
+  lineItemsData: LineItemsDataV1 | null;
   rawExtractedData: Record<string, unknown>;
   ingestionNotes: string | null;
 };
 
 const LINE_ITEM_EPS = 0.02;
+
+type MarkdownInvoiceColumnMap = {
+  desc: number;
+  qty: number;
+  unitPrice: number;
+  lineTotal: number;
+  ht?: number;
+  unitUom?: number;
+  implicitSingleLineItem?: boolean;
+};
 
 @Injectable()
 export class DocumentExtractionService {
@@ -68,6 +83,7 @@ export class DocumentExtractionService {
       tax: null,
       total: null,
       lineItems: [],
+      lineItemsData: null,
       rawExtractedData: {},
       ingestionNotes: null,
     };
@@ -88,6 +104,7 @@ export class DocumentExtractionService {
     } catch (err) {
       return {
         ...base,
+        lineItemsData: null,
         ingestionNotes: `Extraction error: ${err instanceof Error ? err.message : String(err)}`,
         rawExtractedData: { error: String(err) },
       };
@@ -106,6 +123,7 @@ export class DocumentExtractionService {
       tax: b.tax ?? a.tax,
       total: b.total ?? a.total,
       lineItems: b.lineItems?.length ? b.lineItems : a.lineItems,
+      lineItemsData: (b.lineItemsData ?? a.lineItemsData) ?? null,
       rawExtractedData: { ...a.rawExtractedData, ...b.rawExtractedData },
       ingestionNotes: b.ingestionNotes ?? a.ingestionNotes,
     };
@@ -147,6 +165,18 @@ export class DocumentExtractionService {
     try {
       const { fullText, model } = await this.mistralOcr.processImage(buffer);
       const parsed = this.parseTextContent(fullText);
+      const lis = parsed.lineItems ?? [];
+      console.log(
+        `[mistral-ocr] Line items (${lis.length})`,
+        lis.map((li, idx) => ({
+          n: idx + 1,
+          description: li.description.replace(/\s+/g, ' ').trim().slice(0, 100),
+          qty: li.quantity,
+          unitLabel: li.unitLabel ?? null,
+          unitPrice: li.unitPrice,
+          lineTotal: li.lineTotal,
+        })),
+      );
       return {
         ...parsed,
         rawExtractedData: {
@@ -206,6 +236,8 @@ export class DocumentExtractionService {
       tax: primary.tax ?? secondary.tax,
       total: primary.total ?? secondary.total,
       lineItems: pickLines ?? [],
+      lineItemsData:
+        pickLines.length > 0 ? this.buildLineItemsData('', pickLines) : undefined,
       rawExtractedData: {
         ...(typeof primary.rawExtractedData === 'object' && primary.rawExtractedData
           ? primary.rawExtractedData
@@ -342,17 +374,7 @@ export class DocumentExtractionService {
   }
 
   private dedupeLineItems(items: ExtractedLineItem[]): ExtractedLineItem[] {
-    const seen = new Set<string>();
-    const out: ExtractedLineItem[] = [];
-    for (const li of items) {
-      const key = `${li.description}\t${li.quantity}\t${li.unitPrice}\t${li.lineTotal}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      out.push(li);
-    }
-    return out;
+    return items;
   }
 
   private extractCsvLineItems(
@@ -466,6 +488,7 @@ export class DocumentExtractionService {
       tax: this.parseNum(pickMeta(meta, META_ALIASES.tax)),
       total: this.parseNum(pickMeta(meta, META_ALIASES.total)),
       lineItems,
+      lineItemsData: this.buildLineItemsData('', lineItems),
       rawExtractedData: { meta },
     };
   }
@@ -501,8 +524,633 @@ export class DocumentExtractionService {
     return out.join('\n');
   }
 
+  private splitMarkdownPipeRow(line: string): string[] {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|')) {
+      return [];
+    }
+    const lastPipe = trimmed.lastIndexOf('|');
+    if (lastPipe <= 0) {
+      return [];
+    }
+    const inner = trimmed.slice(1, lastPipe);
+    return inner.split('|').map((c) => c.trim());
+  }
+
+  private isMarkdownTableSeparatorRow(cells: string[]): boolean {
+    if (cells.length < 2) {
+      return true;
+    }
+    return cells.every(
+      (c) => c.length === 0 || /^:?-{3,}:?$/.test(c.replace(/\s+/g, '')),
+    );
+  }
+
+  private normalizeHeaderCell(s: string): string {
+    return s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private mapMarkdownInvoiceColumns(cells: string[]): MarkdownInvoiceColumnMap | null {
+    const n = cells.map((c) => this.normalizeHeaderCell(c));
+    const find = (pred: (s: string) => boolean): number => {
+      return n.findIndex(pred);
+    };
+
+    const desc = find((s) =>
+      /\b(desc|description|designation|article|libelle|produit|service|details|product(\s+name)?|item(\s+name)?)\b/.test(
+        s,
+      ),
+    );
+    const qty = find(
+      (s) =>
+        /\b(qte|qty|quantite|quantity|quant)\b/.test(s) ||
+        /\bqte\s*\/\s*unite\b/.test(s) ||
+        /\bqty\s*\/\s*unit(e)?\b/.test(s) ||
+        /\bquantite\s*\/\s*unite\b/.test(s),
+    );
+    const unitPrice = find(
+      (s) =>
+        /\b(prix\s*unitaire|unit\s*price|prezzo\s*unitario|preis\s*stück)\b/.test(s) ||
+        /(^|\s)p\.?\s*u\.?\s*(\(|\/|$)/.test(s) ||
+        (/\bprice\b/.test(s) && !/\b(total|line|gross|net|extended|sale)\s+price\b/i.test(s)) ||
+        /^(rate|preis|prix)\b/.test(s),
+    );
+
+    let lineTotal = find((s) =>
+      /\b(prix\s*ttc|total\s*ttc|montant\s*ttc|ttc(\s|$)|line\s*total|amount)\b/.test(s),
+    );
+    if (lineTotal < 0) {
+      lineTotal = find((s) => /\b(net|payable|zu\s*zahlen|a\s*payer)\b/.test(s));
+    }
+    if (lineTotal < 0) {
+      lineTotal = n.length - 1;
+    }
+
+    const ht = find((s) => /\b(prix\s*ht|montant\s*ht|net\s*ht|subtotal|sous-total)\b/.test(s));
+
+    const unitUom = find(
+      (s) =>
+        (s === 'unit' || s === 'units' || s === 'uom' || s === 'um' || s === 'each') &&
+        !/\bprice\b/.test(s),
+    );
+
+    if (desc < 0 || qty < 0 || unitPrice < 0 || lineTotal < 0) {
+      return null;
+    }
+    if (lineTotal === desc || lineTotal === qty || lineTotal === unitPrice) {
+      return null;
+    }
+    const out: MarkdownInvoiceColumnMap = { desc, qty, unitPrice, lineTotal };
+    if (ht >= 0 && ht !== desc && ht !== qty && ht !== unitPrice && ht !== lineTotal) {
+      out.ht = ht;
+    }
+    if (
+      unitUom >= 0 &&
+      unitUom !== desc &&
+      unitUom !== qty &&
+      unitUom !== unitPrice &&
+      unitUom !== lineTotal &&
+      unitUom !== (out.ht ?? -1)
+    ) {
+      out.unitUom = unitUom;
+    }
+    return out;
+  }
+
+  private mapMarkdownInvoiceColumnsMinimal(cells: string[]): MarkdownInvoiceColumnMap | null {
+    if (cells.length < 3) {
+      return null;
+    }
+    const n = cells.map((c) => this.normalizeHeaderCell(c));
+    if (n.some((s) => /\b(qte|qty|quantite|quantity|quant)\b/.test(s))) {
+      return null;
+    }
+    if (
+      n.some((s) =>
+        /\b(prix\s*unitaire|unit\s*price|prix\s*ht|prezzo\s*unitario|preis)\b/.test(s),
+      )
+    ) {
+      return null;
+    }
+    if (
+      n.some(
+        (s) =>
+          /\bprice\b/.test(s) &&
+          !/\b(total|tax|taxed)\b/.test(s) &&
+          !/^amount$/i.test(s.trim()),
+      )
+    ) {
+      return null;
+    }
+
+    const find = (pred: (s: string) => boolean): number => n.findIndex(pred);
+    const desc = find((s) =>
+      /\b(desc|description|designation|article|libelle|produit|service|details|product(\s+name)?|item(\s+name)?)\b/.test(
+        s,
+      ),
+    );
+
+    let lineTotal = find((s) =>
+      /\b(amount|montant|line\s*amount|extended\s*price)\b/.test(s),
+    );
+    if (lineTotal < 0) {
+      lineTotal = n.length - 1;
+    }
+
+    if (desc < 0 || lineTotal < 0 || desc === lineTotal) {
+      return null;
+    }
+
+    const amountHead = n[lineTotal] ?? '';
+    if (/\b(total\s*due|balance\s*due|grand\s*total|amount\s*payable)\b/.test(amountHead)) {
+      return null;
+    }
+
+    return {
+      desc,
+      qty: 0,
+      unitPrice: 0,
+      lineTotal,
+      implicitSingleLineItem: true,
+    };
+  }
+
+  private looksLikePipeTableHeaderDescription(description: string): boolean {
+    const t = this.normalizeHeaderCell(description);
+    return /^(description|desc|item|article|quantity|qty|qte|unit|uom|price|rate|vat|tva|tax|amount|total|line\s*total)$/.test(
+      t,
+    );
+  }
+
+  private parseQtyUnitCell(cell: string): { qty: number; unitLabel?: string } | null {
+    const t = cell.replace(/\s+/g, ' ').trim();
+    if (!t) {
+      return null;
+    }
+    const m = t.match(/^([\d\s\u00a0]+(?:[.,]\d+)?)\s*(.*)$/u);
+    if (!m || !m[1]) {
+      return null;
+    }
+    const numPart = m[1].replace(/\s/g, '');
+    const qty = this.parseMoneyToken(numPart);
+    if (qty === null || !Number.isFinite(qty) || qty <= 0 || qty > 500_000) {
+      return null;
+    }
+    const rest = (m[2] ?? '').trim();
+    return { qty, unitLabel: rest || undefined };
+  }
+
+  private parseInvoiceTableMoney(cell: string): number | null {
+    const raw = cell.replace(/EUR|USD|GBP|CHF|€|£|\$/gi, '').trim();
+    const compact = raw.replace(/\s+/g, '');
+    if (!compact) {
+      return null;
+    }
+    const decComma2 = /^(\d{1,7}),(\d{2})$/;
+    const m2 = compact.match(decComma2);
+    if (m2) {
+      return Number(`${m2[1]}.${m2[2]}`);
+    }
+    const ocrTrailingZeros = /^([1-9]\d{1,3}),0{3}$/;
+    const mz = compact.match(ocrTrailingZeros);
+    if (mz && Number(mz[1]) <= 999999) {
+      return Number(mz[1]);
+    }
+    return this.parseMoney(compact);
+  }
+
+  private looksLikeInvoiceLetterheadDescription(d: string): boolean {
+    const t = d.replace(/\s+/g, ' ').trim();
+    if (t.length < 2) {
+      return false;
+    }
+    const tl = t.toLowerCase();
+    if (/\bcompany\s+name\b/.test(tl)) {
+      return true;
+    }
+    if (/\bslogan\b/.test(tl) && t.length > 30) {
+      return true;
+    }
+    if (
+      t.length > 180 &&
+      /\b(invoice|facture)\b/i.test(t) &&
+      /\b(due\s*date|bill\s*to|invoice\s*(no|number|#))\b/i.test(tl)
+    ) {
+      return true;
+    }
+    if (
+      t.length > 100 &&
+      /\b(invoice\s*no|invoice\s*number|facture\s*n)\b/i.test(t) &&
+      /\b(due\s*date|total\s*due)\b/i.test(tl)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  private shouldSkipMarkdownDataRow(
+    description: string,
+    cells: string[],
+    map: MarkdownInvoiceColumnMap,
+  ): boolean {
+    const d = description.replace(/\s+/g, ' ').trim();
+    if (this.looksLikeInvoiceLetterheadDescription(d)) {
+      return true;
+    }
+    if (map.implicitSingleLineItem && d.length < 2) {
+      const label = (cells.find((c, i) => i !== map.desc && (c ?? '').trim().length > 0) ?? '').trim();
+      const nl = this.normalizeHeaderCell(label);
+      if (
+        /^(subtotal|taxable|tax\s*rate|tax\s*due|total\s*due|total|other|balance)\b/.test(nl)
+      ) {
+        return true;
+      }
+    }
+    if (d.length < 2) {
+      return true;
+    }
+    if (/^#/.test(d)) {
+      return true;
+    }
+    if (this.looksLikePipeTableHeaderDescription(d)) {
+      return true;
+    }
+    if (/^(tva|vat|total|subtotal|sous-total|grand\s*total|montant\s*t\.?\s*v\.?a)\b/i.test(d)) {
+      return true;
+    }
+    if (/^(base\s*ht|amount\s*due|net\s*a\s*payer)\b/i.test(d)) {
+      return true;
+    }
+    if (/^\d+[.,]?\d*\s*%$/.test(d)) {
+      return true;
+    }
+    const joinLower = cells.map((c) => this.normalizeHeaderCell(c)).join(' ');
+    if (/\bbase\s*ht\b/.test(joinLower) && /\btva\b/.test(joinLower) && cells.length <= 4) {
+      return true;
+    }
+    if (LOOSE_ROW_SKIP.test(d) && cells.length < map.lineTotal + 1) {
+      return true;
+    }
+    return false;
+  }
+
+  private mergeBrokenMarkdownPipeRows(lines: string[]): string[] {
+    const out: string[] = [];
+    let i = 0;
+    while (i < lines.length) {
+      let line = lines[i] ?? '';
+      const t = line.trim();
+      if (t.startsWith('|')) {
+        let j = i + 1;
+        while (j < lines.length) {
+          const nxt = (lines[j] ?? '').trim();
+          if (nxt === '' || nxt.startsWith('|')) {
+            break;
+          }
+          line = `${line.trimEnd()}\n${lines[j]}`;
+          j++;
+        }
+        out.push(line);
+        i = j;
+      } else {
+        out.push(line);
+        i++;
+      }
+    }
+    return out;
+  }
+
+  private markdownTableNeedCols(map: MarkdownInvoiceColumnMap): number {
+    return map.implicitSingleLineItem
+      ? Math.max(map.desc, map.lineTotal) + 1
+      : Math.max(
+          map.desc,
+          map.qty,
+          map.unitPrice,
+          map.lineTotal,
+          map.ht ?? -1,
+          map.unitUom ?? -1,
+        ) + 1;
+  }
+
+  private scoreMarkdownInvoiceTableData(
+    lines: string[],
+    headerIdx: number,
+    map: MarkdownInvoiceColumnMap,
+  ): number {
+    const needCols = this.markdownTableNeedCols(map);
+    let score = 0;
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const line = (lines[i] ?? '').trim();
+      if (!line.startsWith('|')) {
+        continue;
+      }
+      const cells = this.splitMarkdownPipeRow(line);
+      if (cells.length < needCols) {
+        continue;
+      }
+      if (this.isMarkdownTableSeparatorRow(cells)) {
+        continue;
+      }
+      const description = (cells[map.desc] ?? '').replace(/\s+/g, ' ').trim();
+      if (this.shouldSkipMarkdownDataRow(description, cells, map)) {
+        if (/^(tva|total|montant)\b/i.test(description) && cells.length <= 3) {
+          break;
+        }
+        continue;
+      }
+      if (map.implicitSingleLineItem) {
+        const amt = this.parseInvoiceTableMoney(cells[map.lineTotal] ?? '');
+        if (amt != null && amt > 0) {
+          score += 3;
+        }
+        continue;
+      }
+      const qtyPart = this.parseQtyUnitCell(cells[map.qty] ?? '');
+      const ttc = this.parseInvoiceTableMoney(cells[map.lineTotal] ?? '');
+      if (qtyPart && ttc != null && ttc > 0) {
+        score += 5;
+        continue;
+      }
+      const curTtc = ttc;
+      if (
+        (qtyPart === null || curTtc == null || curTtc <= 0) &&
+        i + 1 < lines.length
+      ) {
+        const nextLine = (lines[i + 1] ?? '').trim();
+        if (nextLine.startsWith('|')) {
+          const nextCells = this.splitMarkdownPipeRow(nextLine);
+          if (
+            nextCells.length >= needCols &&
+            !this.isMarkdownTableSeparatorRow(nextCells)
+          ) {
+            const nextDesc = (nextCells[map.desc] ?? '').replace(/\s+/g, ' ').trim();
+            if (!this.shouldSkipMarkdownDataRow(nextDesc, nextCells, map)) {
+              const nQty = this.parseQtyUnitCell(nextCells[map.qty] ?? '');
+              const nTtc = this.parseInvoiceTableMoney(nextCells[map.lineTotal] ?? '');
+              if (nQty && nTtc != null && nTtc > 0 && (curTtc == null || curTtc <= 0)) {
+                score += 5;
+                i += 1;
+              }
+            }
+          }
+        }
+      }
+    }
+    return score;
+  }
+
+  private findBestMarkdownInvoiceTable(rawText: string): {
+    lines: string[];
+    headerIdx: number;
+    map: MarkdownInvoiceColumnMap;
+    headerCells: string[];
+  } | null {
+    const lines = this.mergeBrokenMarkdownPipeRows(rawText.split(/\r?\n/));
+    type Cand = { headerIdx: number; map: MarkdownInvoiceColumnMap; score: number };
+    const candidates: Cand[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const cells = this.splitMarkdownPipeRow(lines[i] ?? '');
+      if (cells.length < 3) {
+        continue;
+      }
+      const full = this.mapMarkdownInvoiceColumns(cells);
+      const minimal = full ?? this.mapMarkdownInvoiceColumnsMinimal(cells);
+      if (!minimal) {
+        continue;
+      }
+      const map = full ?? minimal;
+      const score = this.scoreMarkdownInvoiceTableData(lines, i, map);
+      candidates.push({ headerIdx: i, map, score });
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return b.headerIdx - a.headerIdx;
+    });
+    const best = candidates[0]!;
+    const headerCells = this.splitMarkdownPipeRow(lines[best.headerIdx] ?? '').map((c) =>
+      c.replace(/\s+/g, ' ').trim(),
+    );
+    return { lines, headerIdx: best.headerIdx, map: best.map, headerCells };
+  }
+
+  private extractLineItemsFromMarkdownPipeTables(rawText: string): ExtractedLineItem[] {
+    const ctx = this.findBestMarkdownInvoiceTable(rawText);
+    if (!ctx) {
+      return [];
+    }
+    const { lines, headerIdx, map } = ctx;
+    const needCols = this.markdownTableNeedCols(map);
+
+    const out: ExtractedLineItem[] = [];
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const line = (lines[i] ?? '').trim();
+      if (!line.startsWith('|')) {
+        continue;
+      }
+      let cells = this.splitMarkdownPipeRow(line);
+      if (cells.length < needCols) {
+        continue;
+      }
+      if (this.isMarkdownTableSeparatorRow(cells)) {
+        continue;
+      }
+
+      let description = (cells[map.desc] ?? '').replace(/\s+/g, ' ').trim();
+      if (this.shouldSkipMarkdownDataRow(description, cells, map)) {
+        if (/^(tva|total|montant)\b/i.test(description) && cells.length <= 3) {
+          break;
+        }
+        continue;
+      }
+
+      if (map.implicitSingleLineItem) {
+        const amt = this.parseInvoiceTableMoney(cells[map.lineTotal] ?? '');
+        if (amt == null || !(amt > 0)) {
+          continue;
+        }
+        out.push({
+          description,
+          quantity: 1,
+          unitPrice: amt,
+          lineTotal: amt,
+        });
+        continue;
+      }
+
+      const curTtc0 = this.parseInvoiceTableMoney(cells[map.lineTotal] ?? '');
+      if (
+        (curTtc0 == null || curTtc0 <= 0) &&
+        i + 1 < lines.length
+      ) {
+        const nextLine = (lines[i + 1] ?? '').trim();
+        if (nextLine.startsWith('|')) {
+          const nextCells = this.splitMarkdownPipeRow(nextLine);
+          if (
+            nextCells.length >= needCols &&
+            !this.isMarkdownTableSeparatorRow(nextCells)
+          ) {
+            const nextDesc = (nextCells[map.desc] ?? '').replace(/\s+/g, ' ').trim();
+            if (!this.shouldSkipMarkdownDataRow(nextDesc, nextCells, map)) {
+              const nQty = this.parseQtyUnitCell(nextCells[map.qty] ?? '');
+              const nTtc = this.parseInvoiceTableMoney(nextCells[map.lineTotal] ?? '');
+              if (nQty && nTtc != null && nTtc > 0) {
+                description = `${description} ${nextDesc}`.replace(/\s+/g, ' ').trim();
+                cells = nextCells;
+                i += 1;
+              }
+            }
+          }
+        }
+      }
+
+      const qtyPart = this.parseQtyUnitCell(cells[map.qty] ?? '');
+      const pu = this.parseInvoiceTableMoney(cells[map.unitPrice] ?? '');
+      const ttc = this.parseInvoiceTableMoney(cells[map.lineTotal] ?? '');
+      const ht =
+        map.ht !== undefined ? this.parseInvoiceTableMoney(cells[map.ht] ?? '') : null;
+
+      if (!qtyPart) {
+        continue;
+      }
+      const qty = qtyPart.qty;
+
+      let lineTotalOut: number | null = null;
+      let unitPriceOut: number | null = null;
+
+      if (ttc != null && ttc > 0) {
+        lineTotalOut = ttc;
+        unitPriceOut = ttc / qty;
+      }
+      if (lineTotalOut === null && pu != null && pu > 0 && ht != null && ht > 0) {
+        const sub = qty * pu;
+        if (
+          Math.abs(sub - ht) <= Math.max(LINE_ITEM_EPS, 0.02 * Math.max(ht, sub, 1))
+        ) {
+          lineTotalOut = ht;
+          unitPriceOut = pu;
+        }
+      }
+      if (lineTotalOut === null && ht != null && ht > 0) {
+        lineTotalOut = ht;
+        unitPriceOut = ht / qty;
+      }
+
+      if (lineTotalOut === null || unitPriceOut === null || lineTotalOut <= 0 || unitPriceOut <= 0) {
+        continue;
+      }
+
+      const uom =
+        map.unitUom !== undefined
+          ? (cells[map.unitUom] ?? '').replace(/\s+/g, ' ').trim()
+          : '';
+      const unitLabel =
+        uom.length > 0 && !/^\d+[.,]?\d*\s*%$/.test(uom) ? uom : qtyPart.unitLabel;
+
+      out.push({
+        description,
+        quantity: qty,
+        unitPrice: unitPriceOut,
+        lineTotal: lineTotalOut,
+        unitLabel,
+      });
+    }
+
+    return out;
+  }
+
+  private extractMarkdownPipeTableRawRecords(
+    rawText: string,
+  ): { columns: string[]; rows: Array<Record<string, string>> } | null {
+    const ctx = this.findBestMarkdownInvoiceTable(rawText);
+    if (!ctx) {
+      return null;
+    }
+    const { lines, headerIdx, map, headerCells } = ctx;
+    const slugKeys = slugifyLineItemColumnKeys(headerCells);
+    const rows: Array<Record<string, string>> = [];
+    const needCols = this.markdownTableNeedCols(map);
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+      const line = (lines[i] ?? '').trim();
+      if (!line.startsWith('|')) {
+        continue;
+      }
+      const cells = this.splitMarkdownPipeRow(line);
+      if (cells.length < needCols) {
+        continue;
+      }
+      if (this.isMarkdownTableSeparatorRow(cells)) {
+        continue;
+      }
+
+      const description = (cells[map.desc] ?? '').replace(/\s+/g, ' ').trim();
+      if (this.shouldSkipMarkdownDataRow(description, cells, map)) {
+        if (/^(tva|total|montant)\b/i.test(description) && cells.length <= 3) {
+          break;
+        }
+        continue;
+      }
+
+      const obj: Record<string, string> = {};
+      const maxJ = Math.max(cells.length, slugKeys.length);
+      for (let j = 0; j < maxJ; j++) {
+        const key = slugKeys[j] ?? `col_${j}`;
+        obj[key] = (cells[j] ?? '').replace(/\s+/g, ' ').trim();
+      }
+      rows.push(obj);
+    }
+    return rows.length ? { columns: headerCells, rows } : null;
+  }
+
+  private buildLineItemsData(rawText: string, items: ExtractedLineItem[]): LineItemsDataV1 {
+    const snap = this.extractMarkdownPipeTableRawRecords(rawText);
+    const normalizedItems: LineItemsDataV1['normalizedItems'] = items.map((li) => ({
+      description: li.description,
+      quantity: li.quantity,
+      unitPrice: li.unitPrice,
+      lineTotal: li.lineTotal,
+      ...(li.unitLabel != null && li.unitLabel.trim() !== ''
+        ? { unitLabel: li.unitLabel.trim() }
+        : {}),
+    }));
+    if (snap && snap.rows.length > 0) {
+      return {
+        version: 1,
+        columns: snap.columns,
+        rows: snap.rows,
+        normalizedItems,
+      };
+    }
+    const columns = ['description', 'quantity', 'unitPrice', 'lineTotal', 'unitLabel'];
+    const keys = slugifyLineItemColumnKeys(columns);
+    const rows = normalizedItems.map((li) => {
+      const r: Record<string, string> = {};
+      r[keys[0]!] = li.description;
+      r[keys[1]!] = String(li.quantity);
+      r[keys[2]!] = String(li.unitPrice);
+      r[keys[3]!] = String(li.lineTotal);
+      if (keys[4]) {
+        r[keys[4]!] = li.unitLabel ?? '';
+      }
+      return r;
+    });
+    return { version: 1, columns, rows, normalizedItems };
+  }
+
   private parseTextContent(text: string): Partial<ExtractionResult> {
-    const t = this.normalizeMarkdownPipeTableLines(text.replace(/\r/g, '\n'));
+    const raw = text.replace(/\r/g, '\n');
+    const markdownLineItems = this.extractLineItemsFromMarkdownPipeTables(raw);
+    const t = this.normalizeMarkdownPipeTableLines(raw);
     const meta: Record<string, string> = {};
     const kvLine = /^\s*([^:\n]+)\s*:\s*(.+)$/gim;
     let m: RegExpExecArray | null;
@@ -615,12 +1263,17 @@ export class DocumentExtractionService {
       ...this.extractAllLooseLineItemsFromText(t),
       ...this.extractPermissiveMoneyLineItems(t),
     ]);
-    let lineItems = this.mergeLineItemExtractionCandidates([
-      { items: tableStyleRows, preferOnTie: true },
-      { items: regexTableRows, preferOnTie: true },
-      { items: scannedTriples, preferOnTie: false },
-      { items: looseCombined, preferOnTie: false },
-    ]);
+    let lineItems: ExtractedLineItem[];
+    if (markdownLineItems.length > 0) {
+      lineItems = this.filterGarbageLineItems(markdownLineItems);
+    } else {
+      lineItems = this.mergeLineItemExtractionCandidates([
+        { items: tableStyleRows, preferOnTie: true },
+        { items: regexTableRows, preferOnTie: true },
+        { items: scannedTriples, preferOnTie: false },
+        { items: looseCombined, preferOnTie: false },
+      ]);
+    }
 
     let cur = pickMeta(meta, META_ALIASES.currency) || extractCurrencyLoose(t) || '';
     if (!cur && /\$/m.test(t)) {
@@ -640,6 +1293,7 @@ export class DocumentExtractionService {
       tax,
       total,
       lineItems,
+      lineItemsData: this.buildLineItemsData(raw, lineItems),
       rawExtractedData: { textSnippet: t.slice(0, 2000) },
     };
   }
@@ -652,7 +1306,6 @@ export class DocumentExtractionService {
     ]);
   }
 
-  /** When OCR splits one table row across two lines, merge so tryParseTableStyleInvoiceRow can succeed. */
   private mergeContinuationLinesForInvoiceTable(lines: string[]): string[] {
     const out: string[] = [];
     let i = 0;
@@ -681,6 +1334,9 @@ export class DocumentExtractionService {
       if (d.length < 2) {
         return false;
       }
+      if (this.looksLikeInvoiceLetterheadDescription(d)) {
+        return false;
+      }
       if (/^(sub\s*total|subtotal|grand\s*total|amount\s*due)\b/i.test(d)) {
         return false;
       }
@@ -690,11 +1346,13 @@ export class DocumentExtractionService {
       if (/^total\s+[£€$]?[\d.,]*\s*$/i.test(d)) {
         return false;
       }
+      if (this.looksLikePipeTableHeaderDescription(d)) {
+        return false;
+      }
       return true;
     });
   }
 
-  /** Union candidates from every strategy (deduped); catches rows when one strategy finds 2 and another finds the rest. */
   private mergeLineItemExtractionCandidates(
     candidates: Array<{ items: ExtractedLineItem[]; preferOnTie: boolean }>,
   ): ExtractedLineItem[] {
@@ -706,8 +1364,7 @@ export class DocumentExtractionService {
       return (b.preferOnTie ? 1 : 0) - (a.preferOnTie ? 1 : 0);
     });
     const merged = this.dedupeLineItems(sorted.flatMap((c) => c.items));
-    const filtered = this.filterGarbageLineItems(merged);
-    return filtered.length > 0 ? filtered : merged;
+    return this.filterGarbageLineItems(merged);
   }
 
   private extractLineItemsFromDescriptionColumnTable(text: string): ExtractedLineItem[] {
@@ -760,6 +1417,9 @@ export class DocumentExtractionService {
     if (s.length < 5) {
       return null;
     }
+    if (this.looksLikeInvoiceLineItemsHeader(s)) {
+      return null;
+    }
 
     let m = s.match(/(\d[\d,'’]*[.,]?\d*)\s*$/);
     if (!m) {
@@ -808,6 +1468,9 @@ export class DocumentExtractionService {
       .replace(/\s+/g, ' ')
       .trim();
     if (description.length < 2 || LOOSE_ROW_SKIP.test(description)) {
+      return null;
+    }
+    if (this.looksLikePipeTableHeaderDescription(description)) {
       return null;
     }
     if (/^(sub\s*total|subtotal|tax|vat|total|grand|shipping)\b/i.test(description)) {
@@ -937,6 +1600,9 @@ export class DocumentExtractionService {
 
   private tryParsePermissiveLineItem(line: string): ExtractedLineItem | null {
     const normalized = line.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
+    if (this.looksLikeInvoiceLineItemsHeader(normalized)) {
+      return null;
+    }
     if (!/[a-zA-Z]{2,}/.test(normalized)) {
       return null;
     }
@@ -978,6 +1644,9 @@ export class DocumentExtractionService {
         .replace(/^[slno#\.\s]+\s*/i, '')
         .trim();
       if (description.length < 2 || LOOSE_ROW_SKIP.test(description)) {
+        return null;
+      }
+      if (this.looksLikePipeTableHeaderDescription(description)) {
         return null;
       }
       if (/^(sub\s*total|subtotal|tax|vat|tva|total|grand\s*total|amount\s*due)\b/i.test(description)) {

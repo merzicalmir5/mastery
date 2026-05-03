@@ -1,11 +1,5 @@
 import { franc } from 'franc';
 
-/**
- * First OCR pass language list. We omit `ita` here: upstream `ita.traineddata`
- * often triggers stderr `Error: failed to load ./ita.special-words` (harmless;
- * see tessdata issues around Italian special-words). Italian is still applied in
- * {@link detectTesseractRefinementLang} when franc detects `ita`.
- */
 export const OCR_INITIAL_LANGS = 'eng+fra+deu+bos+hrv+srp+slv+pol+spa+nld+por';
 
 const FRANC_TO_TESSERACT: Record<string, string> = {

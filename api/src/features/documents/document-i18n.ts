@@ -228,7 +228,6 @@ const TOTAL_LABELS = [
 const ISSUE_DATE_LABELS = [
   'Issue date',
   'Invoice date',
-  /** English templates often use a standalone “Date” next to the invoice # (no “Issue”). */
   'Date',
   'Datum',
   'Date de facturation',
@@ -268,7 +267,6 @@ const DUE_DATE_LABELS = [
   'Forfallsdato',
   'Eräpäivä',
   'Vade',
-  /** Can be an amount, not a date — try only when capture looks like a date (see extractDueDateLoose). */
   'Payment due',
 ];
 
@@ -534,9 +532,6 @@ export function extractMoneyAfterLabels(text: string): {
   };
 }
 
-/**
- * Footer scrape when OCR breaks labels (spacing, typos). Reads the last ~45 lines only.
- */
 export function extractInvoiceFooterAmountsLoose(text: string): {
   subtotal: string | null;
   tax: string | null;
@@ -629,7 +624,6 @@ export function captureLooksLikeDate(s: string): boolean {
   );
 }
 
-/** First calendar-like date in the header area when labelled lines fail (OCR noise). */
 export function extractAnyNumericDateLoose(text: string): string | null {
   const head = text.slice(0, Math.min(text.length, 9000));
   const re = /\b(\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4})\b/g;
@@ -679,7 +673,6 @@ export function extractIssueDateLoose(text: string): string | null {
   return null;
 }
 
-/** Match group 1 if it looks like a date (skip "Payment due: 1.234,00" style lines). */
 const LOOKS_LIKE_DATE =
   /\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{2,4}/i;
 

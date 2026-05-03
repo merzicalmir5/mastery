@@ -1,13 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import { Document, DocumentLineItem, ValidationSeverity } from '@prisma/client';
+import { Document, Prisma, ValidationSeverity } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { normalizedItemsFromLineItemsData } from './line-items-data';
+import type { NormalizedLineItemJson } from './line-items-data';
 
 const EPS = 0.02;
 const MS_PER_DAY = 86_400_000;
 const MAX_ISSUE_AGE_YEARS = 15;
 const MAX_DUE_DAYS_AFTER_ISSUE = 5 * 365;
 
-type DocWithLines = Document & { lineItems: DocumentLineItem[] };
+type DocumentRow = Document & {
+  lineItemsData: Prisma.JsonValue | null;
+};
+
+type DocWithNormalizedLines = DocumentRow & {
+  normalizedLines: NormalizedLineItemJson[];
+};
 
 @Injectable()
 export class DocumentValidationService {
@@ -16,13 +24,17 @@ export class DocumentValidationService {
   async run(documentId: string): Promise<void> {
     await this.prisma.documentValidationIssue.deleteMany({ where: { documentId } });
 
-    const doc = await this.prisma.document.findUnique({
+    const docRaw = (await this.prisma.document.findUnique({
       where: { id: documentId },
-      include: { lineItems: { orderBy: { itemOrder: 'asc' } } },
-    });
-    if (!doc) {
+    })) as DocumentRow | null;
+    if (!docRaw) {
       return;
     }
+
+    const doc: DocWithNormalizedLines = {
+      ...docRaw,
+      normalizedLines: normalizedItemsFromLineItemsData(docRaw.lineItemsData),
+    };
 
     const issues: {
       fieldPath: string;
@@ -50,7 +62,7 @@ export class DocumentValidationService {
     }
   }
 
-  private checkMissingFields(doc: DocWithLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
+  private checkMissingFields(doc: DocWithNormalizedLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
     if (doc.documentType == null) {
       issues.push({
         fieldPath: 'documentType',
@@ -115,7 +127,7 @@ export class DocumentValidationService {
         severity: 'WARNING',
       });
     }
-    if (doc.lineItems.length === 0) {
+    if (doc.normalizedLines.length === 0) {
       issues.push({
         fieldPath: 'lineItems',
         code: 'MISSING_ITEMS',
@@ -125,7 +137,7 @@ export class DocumentValidationService {
     }
   }
 
-  private async checkDuplicateNumber(doc: DocWithLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): Promise<void> {
+  private async checkDuplicateNumber(doc: DocWithNormalizedLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): Promise<void> {
     const num = doc.documentNumber?.trim();
     if (!num) {
       return;
@@ -147,7 +159,7 @@ export class DocumentValidationService {
     }
   }
 
-  private checkDates(doc: DocWithLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
+  private checkDates(doc: DocWithNormalizedLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
     if (doc.issueDate && doc.dueDate && doc.issueDate.getTime() > doc.dueDate.getTime()) {
       issues.push({
         fieldPath: 'dueDate',
@@ -213,7 +225,7 @@ export class DocumentValidationService {
     }
   }
 
-  private checkTotals(doc: DocWithLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
+  private checkTotals(doc: DocWithNormalizedLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
     const sub = doc.subtotal != null ? Number(doc.subtotal) : null;
     const tax = doc.tax != null ? Number(doc.tax) : null;
     const tot = doc.total != null ? Number(doc.total) : null;
@@ -230,8 +242,8 @@ export class DocumentValidationService {
     }
 
     const sumLines =
-      doc.lineItems.length > 0
-        ? doc.lineItems.reduce((s, li) => s + Number(li.lineTotal), 0)
+      doc.normalizedLines.length > 0
+        ? doc.normalizedLines.reduce((s, li) => s + Number(li.lineTotal), 0)
         : null;
     if (sumLines !== null && tax !== null && tot !== null) {
       const grandFromLinesOff = Math.abs(sumLines + tax - tot) > EPS;
@@ -249,11 +261,11 @@ export class DocumentValidationService {
     }
   }
 
-  private checkLineItems(doc: DocWithLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
+  private checkLineItems(doc: DocWithNormalizedLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
     const sub = doc.subtotal != null ? Number(doc.subtotal) : null;
-    const sumLines = doc.lineItems.reduce((s, li) => s + Number(li.lineTotal), 0);
+    const sumLines = doc.normalizedLines.reduce((s, li) => s + Number(li.lineTotal), 0);
 
-    if (doc.lineItems.length > 0 && sub !== null && Math.abs(sumLines - sub) > EPS) {
+    if (doc.normalizedLines.length > 0 && sub !== null && Math.abs(sumLines - sub) > EPS) {
       issues.push({
         fieldPath: 'subtotal',
         code: 'LINE_SUM',
@@ -262,18 +274,18 @@ export class DocumentValidationService {
       });
     }
 
-    for (const li of doc.lineItems) {
+    doc.normalizedLines.forEach((li, index) => {
       const q = Number(li.quantity);
       const u = Number(li.unitPrice);
       const lt = Number(li.lineTotal);
       if (Math.abs(q * u - lt) > EPS) {
         issues.push({
-          fieldPath: `lineItems[${li.itemOrder}].lineTotal`,
+          fieldPath: `lineItems[${index}].lineTotal`,
           code: 'LINE_CALC',
           message: `Line "${li.description.slice(0, 40)}": quantity × unit price ≠ line total.`,
           severity: 'WARNING',
         });
       }
-    }
+    });
   }
 }
