@@ -72,9 +72,7 @@ async function bootstrap() {
     const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
     swaggerDocument.security = [{ 'access-token': [] }];
     SwaggerModule.setup(docsPath, app, swaggerDocument);
-    console.log(`[bootstrap] Swagger UI at /${docsPath} (open the Railway API URL, not the Vercel app)`);
   } catch (err: unknown) {
-    console.error('[bootstrap] Swagger setup failed (HTTP API still up)', err);
   }
 
   const parsed = Number.parseInt(process.env.PORT ?? '3000', 10);
