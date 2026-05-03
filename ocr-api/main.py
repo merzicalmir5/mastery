@@ -1,13 +1,3 @@
-"""
-OCR HTTP API for NestJS (FastAPI).
-
-Default engine is **Tesseract** (low RAM, fits small Railway/free tiers).
-Set OCR_ENGINE=easyocr for EasyOCR (requires image built with INSTALL_EASYOCR=true).
-
-Env: OCR_ENGINE=tesseract|easyocr, TESSERACT_LANG (default eng), TESSERACT_CMD (full path to
-tesseract.exe on Windows if not on PATH), OCR_WARMUP_ON_STARTUP=1 only for EasyOCR preload.
-"""
-
 from __future__ import annotations
 
 import io
@@ -46,7 +36,6 @@ def _get_reader():
 
 
 def sanitize_bbox(bbox: Any) -> list[list[float]] | None:
-    """EasyOCR uses numpy scalars in bbox; JSON needs plain Python floats."""
     if bbox is None:
         return None
     try:
@@ -67,8 +56,6 @@ def _bbox_center_yx(bbox: list[list[float]]) -> tuple[float, float]:
 def sort_detections_reading_order(
     detections: list[tuple[Any, str, float]],
 ) -> list[tuple[Any, str, float]]:
-    """Top-to-bottom, left-to-right so fullText matches table / receipt layout."""
-
     def sort_key(item: tuple[Any, str, float]) -> tuple[float, float]:
         bbox, _text, _conf = item
         cy, cx = _bbox_center_yx(bbox)
@@ -78,10 +65,6 @@ def sort_detections_reading_order(
 
 
 def preprocess_for_easyocr(img: Image.Image) -> np.ndarray:
-    """
-    Upscale small receipts and boost contrast so thin digits (e.g. '1') survive OCR.
-    Tunables: OCR_MIN_LONG_SIDE (default 1600), OCR_CONTRAST (default 1.35).
-    """
     img = img.convert("RGB")
     w, h = img.size
     long_side = max(w, h)
@@ -108,7 +91,6 @@ _tesseract_cmd_checked = False
 
 
 def _configure_pytesseract() -> None:
-    """Point pytesseract at the tesseract binary (PATH, TESSERACT_CMD, or common Windows paths)."""
     global _tesseract_cmd_checked
     if _tesseract_cmd_checked:
         return
@@ -143,7 +125,6 @@ def _configure_pytesseract() -> None:
             _tesseract_cmd_checked = True
             return
 
-    # Windows: installer sometimes adds to PATH only for new shells; where.exe still finds it.
     if os.name == "nt":
         try:
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -170,7 +151,6 @@ def _configure_pytesseract() -> None:
 
 
 def run_tesseract_ocr(img: Image.Image) -> list[dict[str, Any]]:
-    """Tesseract word boxes → same line dict shape as the EasyOCR path."""
     import pytesseract
     from pytesseract import Output
 
@@ -248,9 +228,6 @@ def _looks_like_money(token: str) -> bool:
 
 
 def parse_currency_token(token: str) -> float | None:
-    """
-    OCR often reads $ as S (e.g. S450). Also plain integers on invoices.
-    """
     t = token.strip()
     if not t:
         return None
@@ -273,10 +250,6 @@ def parse_currency_token(token: str) -> float | None:
 
 
 def parse_price_total_row_cells(texts: list[str]) -> dict[str, Any] | None:
-    """
-    Row layout: … description … | unit price | line total (no 'each'), e.g. mock invoices.
-    Uses last two tokens as currency when parsable.
-    """
     if len(texts) < 3:
         return None
     if _is_footer_row(texts):
@@ -307,10 +280,6 @@ def parse_price_total_row_cells(texts: list[str]) -> dict[str, Any] | None:
 
 
 def structured_line_items_price_total_flat(tokens: list[str]) -> list[dict[str, Any]]:
-    """
-    Detect repeated blocks: 'Product Name Here' + price token + total token + description lines
-    until next product row or footer (common invoice templates without 'each').
-    """
     tks = [t.strip() for t in tokens if t.strip()]
     if not tks:
         return []
@@ -384,7 +353,6 @@ def _bbox_height(bbox: list[list[float]]) -> float:
 
 
 def cluster_lines_into_rows(lines: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    """Group OCR boxes that share the same visual row (similar Y center)."""
     boxed = [ln for ln in lines if ln.get("bbox") is not None]
     if len(boxed) < 2:
         return []
@@ -417,7 +385,6 @@ _FOOTER_ROW_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Rows that start summary / footer section (stop table body before these)
 _TABLE_FOOTER_START_RE = re.compile(
     r"sub\s*total|subtotal|grand\s*total|amount\s*due|balance\s*due|tax\s*\d|discount\s*\d|^vat\s",
     re.IGNORECASE,
@@ -449,7 +416,6 @@ def _is_footer_row(texts: list[str]) -> bool:
 
 
 def row_looks_like_column_header(texts: list[str]) -> bool:
-    """Synonym-agnostic: table header row usually contains several column keywords."""
     if len(texts) < 2:
         return False
     blob = " ".join(t.lower() for t in texts)
@@ -487,10 +453,6 @@ def find_table_footer_row_index(
 
 
 def parse_geometric_data_row(texts_raw: list[str]) -> dict[str, Any] | None:
-    """
-    Use token order L→R: description prefix, optional qty, trailing currency… unit price, line total.
-    Works without fixed column titles (Description vs Product name, etc.).
-    """
     texts = [t.strip() for t in texts_raw if t.strip()]
     if len(texts) < 2:
         return None
@@ -538,7 +500,6 @@ def parse_geometric_data_row(texts_raw: list[str]) -> dict[str, Any] | None:
 
     if unit_p <= 0 or lt <= 0:
         return None
-    # Skip OCR garbage / invoice IDs mistaken for amounts
     if lt > 50_000_000 or unit_p > 50_000_000 or max(money_vals) > 50_000_000:
         return None
 
@@ -554,9 +515,6 @@ def parse_geometric_data_row(texts_raw: list[str]) -> dict[str, Any] | None:
 
 
 def extract_geometric_line_items(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Table row count ≈ visual rows between detected header and footer (bbox geometry).
-    """
     clusters = cluster_lines_into_rows(lines)
     if not clusters:
         return []
@@ -578,7 +536,6 @@ def extract_geometric_line_items(lines: list[dict[str, Any]]) -> list[dict[str, 
     if out:
         return out
 
-    # No header match: take rows before footer that parse as line items (weak signal)
     footer_only = find_table_footer_row_index(clusters, 0)
     for row in clusters[:footer_only]:
         texts = [str(c.get("text") or "").strip() for c in row]
@@ -591,9 +548,6 @@ def extract_geometric_line_items(lines: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def parse_invoice_row_cells(texts: list[str]) -> dict[str, Any] | None:
-    """
-    One table row left→right: … description … | qty? | each | unit price? | … | line total.
-    """
     if not texts:
         return None
     low = [t.lower() for t in texts]
@@ -629,12 +583,6 @@ def parse_invoice_row_cells(texts: list[str]) -> dict[str, Any] | None:
 
 
 def extract_structured_line_items(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    1) Geometry (header/footer + numeric tails) — layout-agnostic column names.
-    2) Legacy row parsers (each / price–total on one cluster).
-    3) Template-specific flat tokens (Product Name Here…).
-    4) each-token fallback.
-    """
     flat_tokens = [str(ln.get("text") or "").strip() for ln in lines]
 
     geo = extract_geometric_line_items(lines)
@@ -661,7 +609,6 @@ def extract_structured_line_items(lines: list[dict[str, Any]]) -> list[dict[str,
 
 
 def structured_line_items_token_fallback(tokens: list[str]) -> list[dict[str, Any]]:
-    """Last resort: find segments … [qty?] 'each' … money … between flat OCR tokens."""
     tks = [t.strip() for t in tokens if t.strip()]
     out: list[dict[str, Any]] = []
     i = 0
@@ -713,10 +660,6 @@ def structured_line_items_token_fallback(tokens: list[str]) -> list[dict[str, An
 def inject_implicit_quantity_before_each_rows(
     lines: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """
-    If OCR skips a lone '1' before 'each', insert quantity 1 (common on receipts).
-    Only when the token before 'each' is not already a quantity or money amount.
-    """
     if not lines:
         return lines
     out: list[dict[str, Any]] = []
@@ -775,7 +718,6 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    """Browser hits / on deploy smoke checks; real OCR is POST /ocr/image."""
     return {
         "service": "mastery-ocr-api",
         "docs": "/docs",
