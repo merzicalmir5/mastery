@@ -21,8 +21,16 @@ import {
 } from './document-i18n';
 import { MistralOcrService } from './mistral-ocr.service';
 import {
+  buildTotalsCheckV1,
+  extractDiscountLinesFromInvoiceText,
+  extractVatLinesFromInvoiceText,
+} from './invoice-vat-discount';
+import {
   type LineItemsDataV1,
+  roundMoney2Decimals,
+  roundMoney2Nullable,
   slugifyLineItemColumnKeys,
+  toFixed2JsonNumber,
 } from './line-items-data';
 export type ExtractedLineItem = {
   description: string;
@@ -49,6 +57,8 @@ export type ExtractionResult = {
 };
 
 const LINE_ITEM_EPS = 0.02;
+const DOCUMENT_DATE_YEAR_MIN = 1900;
+const DOCUMENT_DATE_YEAR_MAX = 2100;
 
 type MarkdownInvoiceColumnMap = {
   desc: number;
@@ -484,9 +494,9 @@ export class DocumentExtractionService {
       issueDate: this.parseDate(pickMeta(meta, META_ALIASES.issueDate)),
       dueDate: this.parseDate(pickMeta(meta, META_ALIASES.dueDate)),
       currency: (pickMeta(meta, META_ALIASES.currency) ?? '').toUpperCase() || null,
-      subtotal: this.parseNum(pickMeta(meta, META_ALIASES.subtotal)),
-      tax: this.parseNum(pickMeta(meta, META_ALIASES.tax)),
-      total: this.parseNum(pickMeta(meta, META_ALIASES.total)),
+      subtotal: roundMoney2Nullable(this.parseNum(pickMeta(meta, META_ALIASES.subtotal))),
+      tax: roundMoney2Nullable(this.parseNum(pickMeta(meta, META_ALIASES.tax))),
+      total: roundMoney2Nullable(this.parseNum(pickMeta(meta, META_ALIASES.total))),
       lineItems,
       lineItemsData: this.buildLineItemsData('', lineItems),
       rawExtractedData: { meta },
@@ -562,7 +572,7 @@ export class DocumentExtractionService {
     };
 
     const desc = find((s) =>
-      /\b(desc|description|designation|article|libelle|produit|service|details|product(\s+name)?|item(\s+name)?)\b/.test(
+      /\b(desc|description|designation|article|libelle|produit|service|details|product(\s+name)?|item(\s+name)?|category|type)\b/.test(
         s,
       ),
     );
@@ -602,18 +612,28 @@ export class DocumentExtractionService {
     if (desc < 0 || qty < 0 || unitPrice < 0 || lineTotal < 0) {
       return null;
     }
-    if (lineTotal === desc || lineTotal === qty || lineTotal === unitPrice) {
+    let resolvedUnitPrice = unitPrice;
+    if (unitPrice === lineTotal && qty > desc + 1) {
+      resolvedUnitPrice = qty - 1;
+    }
+    if (
+      resolvedUnitPrice === desc ||
+      resolvedUnitPrice === qty ||
+      lineTotal === desc ||
+      lineTotal === qty ||
+      lineTotal === resolvedUnitPrice
+    ) {
       return null;
     }
-    const out: MarkdownInvoiceColumnMap = { desc, qty, unitPrice, lineTotal };
-    if (ht >= 0 && ht !== desc && ht !== qty && ht !== unitPrice && ht !== lineTotal) {
+    const out: MarkdownInvoiceColumnMap = { desc, qty, unitPrice: resolvedUnitPrice, lineTotal };
+    if (ht >= 0 && ht !== desc && ht !== qty && ht !== resolvedUnitPrice && ht !== lineTotal) {
       out.ht = ht;
     }
     if (
       unitUom >= 0 &&
       unitUom !== desc &&
       unitUom !== qty &&
-      unitUom !== unitPrice &&
+      unitUom !== resolvedUnitPrice &&
       unitUom !== lineTotal &&
       unitUom !== (out.ht ?? -1)
     ) {
@@ -650,7 +670,7 @@ export class DocumentExtractionService {
 
     const find = (pred: (s: string) => boolean): number => n.findIndex(pred);
     const desc = find((s) =>
-      /\b(desc|description|designation|article|libelle|produit|service|details|product(\s+name)?|item(\s+name)?)\b/.test(
+      /\b(desc|description|designation|article|libelle|produit|service|details|product(\s+name)?|item(\s+name)?|category|type)\b/.test(
         s,
       ),
     );
@@ -724,12 +744,21 @@ export class DocumentExtractionService {
     return this.parseMoney(compact);
   }
 
+  private cleanExtractedLineItemDescription(s: string): string {
+    let t = s.replace(/\s+/g, ' ').trim();
+    t = t.replace(/^\s*(\|\s*)+/g, '');
+    return t.replace(/\s+/g, ' ').trim();
+  }
+
   private looksLikeInvoiceLetterheadDescription(d: string): boolean {
     const t = d.replace(/\s+/g, ' ').trim();
     if (t.length < 2) {
       return false;
     }
     const tl = t.toLowerCase();
+    if (/\*\*invoice\s*to\*\*/i.test(t) || /^\*\*invoice\s*to\b/i.test(t)) {
+      return true;
+    }
     if (/\bcompany\s+name\b/.test(tl)) {
       return true;
     }
@@ -1116,9 +1145,9 @@ export class DocumentExtractionService {
     const snap = this.extractMarkdownPipeTableRawRecords(rawText);
     const normalizedItems: LineItemsDataV1['normalizedItems'] = items.map((li) => ({
       description: li.description,
-      quantity: li.quantity,
-      unitPrice: li.unitPrice,
-      lineTotal: li.lineTotal,
+      quantity: roundMoney2Decimals(li.quantity),
+      unitPrice: roundMoney2Decimals(li.unitPrice),
+      lineTotal: roundMoney2Decimals(li.lineTotal),
       ...(li.unitLabel != null && li.unitLabel.trim() !== ''
         ? { unitLabel: li.unitLabel.trim() }
         : {}),
@@ -1136,9 +1165,9 @@ export class DocumentExtractionService {
     const rows = normalizedItems.map((li) => {
       const r: Record<string, string> = {};
       r[keys[0]!] = li.description;
-      r[keys[1]!] = String(li.quantity);
-      r[keys[2]!] = String(li.unitPrice);
-      r[keys[3]!] = String(li.lineTotal);
+      r[keys[1]!] = toFixed2JsonNumber(li.quantity);
+      r[keys[2]!] = toFixed2JsonNumber(li.unitPrice);
+      r[keys[3]!] = toFixed2JsonNumber(li.lineTotal);
       if (keys[4]) {
         r[keys[4]!] = li.unitLabel ?? '';
       }
@@ -1246,6 +1275,36 @@ export class DocumentExtractionService {
       tax = this.parseMoney(footer.tax);
     }
 
+    const combinedMoneyText = `${raw}\n${t}`;
+    const vatLines = extractVatLinesFromInvoiceText(combinedMoneyText, (s) => this.parseMoney(s));
+    const discountLines = extractDiscountLinesFromInvoiceText(combinedMoneyText, (s) =>
+      this.parseMoney(s),
+    );
+    const sumVatFromLines =
+      vatLines.length > 0
+        ? roundMoney2Decimals(vatLines.reduce((a, v) => a + v.amount, 0))
+        : null;
+    if (sumVatFromLines != null) {
+      tax = sumVatFromLines;
+    }
+    const sumVatForCheck =
+      sumVatFromLines != null
+        ? sumVatFromLines
+        : tax != null
+          ? roundMoney2Decimals(tax)
+          : 0;
+
+    sub = sub != null ? roundMoney2Decimals(sub) : null;
+    tax = tax != null ? roundMoney2Decimals(tax) : null;
+    total = total != null ? roundMoney2Decimals(total) : null;
+
+    const totalsCheck = buildTotalsCheckV1({
+      subtotal: sub,
+      sumVat: sumVatForCheck,
+      discountLines,
+      declaredTotal: total,
+    });
+
     let issueRaw =
       pickMeta(meta, META_ALIASES.issueDate) ||
       meta.date ||
@@ -1294,7 +1353,12 @@ export class DocumentExtractionService {
       total,
       lineItems,
       lineItemsData: this.buildLineItemsData(raw, lineItems),
-      rawExtractedData: { textSnippet: t.slice(0, 2000) },
+      rawExtractedData: {
+        textSnippet: t.slice(0, 2000),
+        vatLines,
+        discountLines,
+        totalsCheck,
+      },
     };
   }
 
@@ -1329,8 +1393,12 @@ export class DocumentExtractionService {
   }
 
   private filterGarbageLineItems(items: ExtractedLineItem[]): ExtractedLineItem[] {
-    return items.filter((li) => {
-      const d = li.description.replace(/\s+/g, ' ').trim();
+    const cleaned = items.map((li) => ({
+      ...li,
+      description: this.cleanExtractedLineItemDescription(li.description),
+    }));
+    return cleaned.filter((li) => {
+      const d = li.description;
       if (d.length < 2) {
         return false;
       }
@@ -1991,6 +2059,14 @@ export class DocumentExtractionService {
     return Number.isFinite(n) ? n : null;
   }
 
+  private isReasonableDocumentDate(d: Date): boolean {
+    if (Number.isNaN(d.getTime())) {
+      return false;
+    }
+    const y = d.getFullYear();
+    return y >= DOCUMENT_DATE_YEAR_MIN && y <= DOCUMENT_DATE_YEAR_MAX;
+  }
+
   private parseDate(s: string | null | undefined): Date | null {
     if (s == null) {
       return null;
@@ -2011,8 +2087,16 @@ export class DocumentExtractionService {
       const y = parseInt(iso[1], 10);
       const mo = parseInt(iso[2], 10) - 1;
       const day = parseInt(iso[3], 10);
+      if (y < DOCUMENT_DATE_YEAR_MIN || y > DOCUMENT_DATE_YEAR_MAX) {
+        return null;
+      }
       const d = new Date(y, mo, day);
-      if (d.getFullYear() === y && d.getMonth() === mo && d.getDate() === day) {
+      if (
+        d.getFullYear() === y &&
+        d.getMonth() === mo &&
+        d.getDate() === day &&
+        this.isReasonableDocumentDate(d)
+      ) {
         return d;
       }
     }
@@ -2025,14 +2109,25 @@ export class DocumentExtractionService {
       if (year < 100) {
         year += year >= 70 ? 1900 : 2000;
       }
+      if (year < DOCUMENT_DATE_YEAR_MIN || year > DOCUMENT_DATE_YEAR_MAX) {
+        return null;
+      }
       const d = new Date(year, month, day);
-      if (!Number.isNaN(d.getTime()) && d.getDate() === day && d.getMonth() === month) {
+      if (
+        !Number.isNaN(d.getTime()) &&
+        d.getDate() === day &&
+        d.getMonth() === month &&
+        this.isReasonableDocumentDate(d)
+      ) {
         return d;
       }
     }
 
     const fallback = new Date(raw);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
+    if (Number.isNaN(fallback.getTime()) || !this.isReasonableDocumentDate(fallback)) {
+      return null;
+    }
+    return fallback;
   }
 
   private findCsvColumnIndex(header: string[], alias: string): number {

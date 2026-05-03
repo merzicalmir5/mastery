@@ -381,12 +381,17 @@ export const CSV_COLUMN_ALIASES = {
   unitPrice: [
     'unit_price',
     'price',
+    'unit_cost',
     'preis',
     'prix',
     'prezzo',
     'precio',
     'preço',
     'cena',
+    'cijena',
+    'jed_cijena',
+    'jedinicna_cijena',
+    'jedinicna',
     'einzelpreis',
   ],
   lineTotal: [

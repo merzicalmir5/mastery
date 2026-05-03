@@ -1,3 +1,21 @@
+export function roundMoney2Decimals(n: number): number {
+  if (typeof n !== 'number' || !Number.isFinite(n)) {
+    return 0;
+  } 
+  return Math.round(n * 100) / 100;
+}
+
+export function roundMoney2Nullable(n: number | null | undefined): number | null {
+  if (n == null || typeof n !== 'number' || !Number.isFinite(n)) {
+    return null;
+  }
+  return roundMoney2Decimals(n);
+}
+
+export function toFixed2JsonNumber(n: number): string {
+  return roundMoney2Decimals(n).toFixed(2);
+}
+
 export type NormalizedLineItemJson = {
   description: string;
   quantity: number;
@@ -46,9 +64,9 @@ export function normalizedItemsFromLineItemsData(json: unknown): NormalizedLineI
       const v = item as NormalizedLineItemJson;
       out.push({
         description: v.description,
-        quantity: v.quantity,
-        unitPrice: v.unitPrice,
-        lineTotal: v.lineTotal,
+        quantity: roundMoney2Decimals(v.quantity),
+        unitPrice: roundMoney2Decimals(v.unitPrice),
+        lineTotal: roundMoney2Decimals(v.lineTotal),
         ...(v.unitLabel != null && String(v.unitLabel).trim() !== ''
           ? { unitLabel: String(v.unitLabel).trim() }
           : {}),
@@ -93,9 +111,9 @@ export function buildLineItemsDataFromEditorPatch(
   const slugKeys = slugifyLineItemColumnKeys(columns);
   const normalizedItems: NormalizedLineItemJson[] = items.map((li) => ({
     description: li.description.trim(),
-    quantity: li.quantity,
-    unitPrice: li.unitPrice,
-    lineTotal: li.lineTotal,
+    quantity: roundMoney2Decimals(li.quantity),
+    unitPrice: roundMoney2Decimals(li.unitPrice),
+    lineTotal: roundMoney2Decimals(li.lineTotal),
     ...(li.unitLabel != null && String(li.unitLabel).trim() !== ''
       ? { unitLabel: String(li.unitLabel).trim() }
       : {}),
@@ -103,9 +121,9 @@ export function buildLineItemsDataFromEditorPatch(
   const rows = normalizedItems.map((li) => {
     const r: Record<string, string> = {};
     r[slugKeys[0]!] = li.description;
-    r[slugKeys[1]!] = String(li.quantity);
-    r[slugKeys[2]!] = String(li.unitPrice);
-    r[slugKeys[3]!] = String(li.lineTotal);
+    r[slugKeys[1]!] = toFixed2JsonNumber(li.quantity);
+    r[slugKeys[2]!] = toFixed2JsonNumber(li.unitPrice);
+    r[slugKeys[3]!] = toFixed2JsonNumber(li.lineTotal);
     if (slugKeys[4]) {
       r[slugKeys[4]!] = li.unitLabel ?? '';
     }

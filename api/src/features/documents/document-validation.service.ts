@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Document, Prisma, ValidationSeverity } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { normalizedItemsFromLineItemsData } from './line-items-data';
+import { normalizedItemsFromLineItemsData, roundMoney2Decimals } from './line-items-data';
 import type { NormalizedLineItemJson } from './line-items-data';
 
 const EPS = 0.02;
@@ -226,44 +226,72 @@ export class DocumentValidationService {
   }
 
   private checkTotals(doc: DocWithNormalizedLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
-    const sub = doc.subtotal != null ? Number(doc.subtotal) : null;
-    const tax = doc.tax != null ? Number(doc.tax) : null;
-    const tot = doc.total != null ? Number(doc.total) : null;
+    const sub = doc.subtotal != null ? roundMoney2Decimals(Number(doc.subtotal)) : null;
+    const tax = doc.tax != null ? roundMoney2Decimals(Number(doc.tax)) : null;
+    const tot = doc.total != null ? roundMoney2Decimals(Number(doc.total)) : null;
 
-    if (sub !== null && tax !== null && tot !== null) {
-      if (Math.abs(sub + tax - tot) > EPS) {
+    const raw = doc.rawExtractedData as Record<string, unknown> | null | undefined;
+    const tc = raw?.['totalsCheck'] as Record<string, unknown> | undefined;
+    if (tc && typeof tc['withinTolerance'] === 'boolean') {
+      if (tc['withinTolerance'] === false) {
+        const computed = Number(tc['computedTotal']);
+        const declared = Number(tc['declaredTotal']);
+        const delta = tc['delta'] != null ? Number(tc['delta']) : NaN;
         issues.push({
           fieldPath: 'total',
-          code: 'TOTAL_MISMATCH',
-          message: 'Subtotal + tax does not match total.',
-          severity: 'ERROR',
+          code: 'TOTAL_VAT_DISCOUNT_MISMATCH',
+          message: `Subtotal + VAT − discounts (${Number.isFinite(computed) ? computed.toFixed(2) : '—'}) does not match total (${Number.isFinite(declared) ? declared.toFixed(2) : '—'}); Δ ${Number.isFinite(delta) ? delta.toFixed(2) : '—'}.`,
+          severity: 'WARNING',
         });
+      }
+      const sumVat = tc['sumVat'] != null ? Number(tc['sumVat']) : null;
+      if (sumVat != null && sumVat > 0 && tax != null && Math.abs(sumVat - tax) > EPS) {
+        issues.push({
+          fieldPath: 'tax',
+          code: 'TAX_VS_VAT_SUM',
+          message: 'Document tax field differs from the sum used in the VAT/discount totals check.',
+          severity: 'WARNING',
+        });
+      }
+    } else {
+      if (sub !== null && tax !== null && tot !== null) {
+        if (Math.abs(sub + tax - tot) > EPS) {
+          issues.push({
+            fieldPath: 'total',
+            code: 'TOTAL_MISMATCH',
+            message: 'Subtotal + tax does not match total.',
+            severity: 'ERROR',
+          });
+        }
       }
     }
 
-    const sumLines =
-      doc.normalizedLines.length > 0
-        ? doc.normalizedLines.reduce((s, li) => s + Number(li.lineTotal), 0)
-        : null;
-    if (sumLines !== null && tax !== null && tot !== null) {
-      const grandFromLinesOff = Math.abs(sumLines + tax - tot) > EPS;
-      const subDiffersFromLines =
-        sub === null || Math.abs(sumLines - sub) > EPS;
-      if (grandFromLinesOff && subDiffersFromLines) {
-        issues.push({
-          fieldPath: 'total',
-          code: 'LINE_TAX_TOTAL',
-          message:
-            'Sum of line totals + tax does not match document total (often means subtotal vs lines mismatch or VAT-inclusive lines — review amounts).',
-          severity: 'ERROR',
-        });
+    if (!tc) {
+      const sumLines =
+        doc.normalizedLines.length > 0
+          ? roundMoney2Decimals(doc.normalizedLines.reduce((s, li) => s + Number(li.lineTotal), 0))
+          : null;
+      if (sumLines !== null && tax !== null && tot !== null) {
+        const grandFromLinesOff = Math.abs(sumLines + tax - tot) > EPS;
+        const subDiffersFromLines = sub === null || Math.abs(sumLines - sub) > EPS;
+        if (grandFromLinesOff && subDiffersFromLines) {
+          issues.push({
+            fieldPath: 'total',
+            code: 'LINE_TAX_TOTAL',
+            message:
+              'Sum of line totals + tax does not match document total (often means subtotal vs lines mismatch or VAT-inclusive lines — review amounts).',
+            severity: 'ERROR',
+          });
+        }
       }
     }
   }
 
   private checkLineItems(doc: DocWithNormalizedLines, issues: { fieldPath: string; code: string; message: string; severity: ValidationSeverity }[]): void {
-    const sub = doc.subtotal != null ? Number(doc.subtotal) : null;
-    const sumLines = doc.normalizedLines.reduce((s, li) => s + Number(li.lineTotal), 0);
+    const sub = doc.subtotal != null ? roundMoney2Decimals(Number(doc.subtotal)) : null;
+    const sumLines = roundMoney2Decimals(
+      doc.normalizedLines.reduce((s, li) => s + Number(li.lineTotal), 0),
+    );
 
     if (doc.normalizedLines.length > 0 && sub !== null && Math.abs(sumLines - sub) > EPS) {
       issues.push({
@@ -275,9 +303,9 @@ export class DocumentValidationService {
     }
 
     doc.normalizedLines.forEach((li, index) => {
-      const q = Number(li.quantity);
-      const u = Number(li.unitPrice);
-      const lt = Number(li.lineTotal);
+      const q = roundMoney2Decimals(Number(li.quantity));
+      const u = roundMoney2Decimals(Number(li.unitPrice));
+      const lt = roundMoney2Decimals(Number(li.lineTotal));
       if (Math.abs(q * u - lt) > EPS) {
         issues.push({
           fieldPath: `lineItems[${index}].lineTotal`,

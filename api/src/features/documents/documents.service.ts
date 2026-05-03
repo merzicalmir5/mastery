@@ -24,6 +24,8 @@ import { UpdateDocumentDto } from './dto/update-document.dto';
 import {
   buildLineItemsDataFromEditorPatch,
   normalizedItemsFromLineItemsData,
+  roundMoney2Decimals,
+  roundMoney2Nullable,
 } from './line-items-data';
 
 type DocumentUpdatePayload = Prisma.DocumentUpdateInput & {
@@ -70,6 +72,7 @@ export type DocumentApiRow = {
     message: string;
     severity: string;
   }[];
+  rawExtractedData: unknown | null;
 };
 
 export type PaginatedResult<T> = {
@@ -248,8 +251,13 @@ export class DocumentsService {
       });
     }
 
-    const from = this.parseDateParam(params.updatedFrom);
-    const to = this.parseDateParam(params.updatedTo);
+    let from = this.parseDateParam(params.updatedFrom);
+    let to = this.parseDateParam(params.updatedTo);
+    if (from && to && from.getTime() > to.getTime()) {
+      const tmp = from;
+      from = to;
+      to = tmp;
+    }
     const updatedFilter: { gte?: Date; lte?: Date } = {};
     if (from) {
       updatedFilter.gte = from;
@@ -389,13 +397,13 @@ export class DocumentsService {
       data.currency = dto.currency;
     }
     if (dto.subtotal !== undefined) {
-      data.subtotal = dto.subtotal;
+      data.subtotal = new Prisma.Decimal(roundMoney2Decimals(Number(dto.subtotal)));
     }
     if (dto.tax !== undefined) {
-      data.tax = dto.tax;
+      data.tax = new Prisma.Decimal(roundMoney2Decimals(Number(dto.tax)));
     }
     if (dto.total !== undefined) {
-      data.total = dto.total;
+      data.total = new Prisma.Decimal(roundMoney2Decimals(Number(dto.total)));
     }
 
     const action = dto.action ?? 'save';
@@ -458,10 +466,15 @@ export class DocumentsService {
   }
 
   private buildFinalSnapshot(doc: Document, dto: UpdateDocumentDto): Record<string, unknown> {
-    const sub =
-      dto.subtotal !== undefined ? dto.subtotal : doc.subtotal != null ? Number(doc.subtotal) : null;
-    const tax = dto.tax !== undefined ? dto.tax : doc.tax != null ? Number(doc.tax) : null;
-    const tot = dto.total !== undefined ? dto.total : doc.total != null ? Number(doc.total) : null;
+    const sub = roundMoney2Nullable(
+      dto.subtotal !== undefined ? dto.subtotal : doc.subtotal != null ? Number(doc.subtotal) : null,
+    );
+    const tax = roundMoney2Nullable(
+      dto.tax !== undefined ? dto.tax : doc.tax != null ? Number(doc.tax) : null,
+    );
+    const tot = roundMoney2Nullable(
+      dto.total !== undefined ? dto.total : doc.total != null ? Number(doc.total) : null,
+    );
     const issue =
       dto.issueDate !== undefined
         ? dto.issueDate
@@ -478,9 +491,9 @@ export class DocumentsService {
       dto.lineItems !== undefined
         ? dto.lineItems.map((li) => ({
             description: li.description.trim(),
-            quantity: li.quantity,
-            unitPrice: li.unitPrice,
-            lineTotal: li.lineTotal,
+            quantity: roundMoney2Decimals(li.quantity),
+            unitPrice: roundMoney2Decimals(li.unitPrice),
+            lineTotal: roundMoney2Decimals(li.lineTotal),
             ...(li.unitLabel != null && String(li.unitLabel).trim() !== ''
               ? { unitLabel: String(li.unitLabel).trim() }
               : {}),
@@ -489,9 +502,9 @@ export class DocumentsService {
             (doc as { lineItemsData?: unknown }).lineItemsData,
           ).map((li) => ({
             description: li.description,
-            quantity: li.quantity,
-            unitPrice: li.unitPrice,
-            lineTotal: li.lineTotal,
+            quantity: roundMoney2Decimals(li.quantity),
+            unitPrice: roundMoney2Decimals(li.unitPrice),
+            lineTotal: roundMoney2Decimals(li.lineTotal),
             ...(li.unitLabel ? { unitLabel: li.unitLabel } : {}),
           }));
     return {
@@ -521,7 +534,7 @@ export class DocumentsService {
         : Prisma.JsonNull;
 
     const ingestPayload: DocumentUpdatePayload = {
-      documentType: extracted.documentType ?? undefined,
+      documentType: extracted.documentType ?? DocumentType.INVOICE,
       supplierName: extracted.supplierName,
       documentNumber: extracted.documentNumber,
       issueDate: extracted.issueDate,
@@ -529,15 +542,15 @@ export class DocumentsService {
       currency: extracted.currency,
       subtotal:
         extracted.subtotal !== null && extracted.subtotal !== undefined
-          ? new Prisma.Decimal(extracted.subtotal)
+          ? new Prisma.Decimal(roundMoney2Decimals(extracted.subtotal))
           : null,
       tax:
         extracted.tax !== null && extracted.tax !== undefined
-          ? new Prisma.Decimal(extracted.tax)
+          ? new Prisma.Decimal(roundMoney2Decimals(extracted.tax))
           : null,
       total:
         extracted.total !== null && extracted.total !== undefined
-          ? new Prisma.Decimal(extracted.total)
+          ? new Prisma.Decimal(roundMoney2Decimals(extracted.total))
           : null,
       rawExtractedData: extracted.rawExtractedData as Prisma.InputJsonValue,
       lineItemsData: lineItemsJson,
@@ -669,9 +682,9 @@ export class DocumentsService {
       issueDate: doc.issueDate?.toISOString().slice(0, 10) ?? null,
       dueDate: doc.dueDate?.toISOString().slice(0, 10) ?? null,
       currency: doc.currency,
-      subtotal: doc.subtotal != null ? Number(doc.subtotal) : null,
-      tax: doc.tax != null ? Number(doc.tax) : null,
-      total: doc.total != null ? Number(doc.total) : null,
+      subtotal: roundMoney2Nullable(doc.subtotal != null ? Number(doc.subtotal) : null),
+      tax: roundMoney2Nullable(doc.tax != null ? Number(doc.tax) : null),
+      total: roundMoney2Nullable(doc.total != null ? Number(doc.total) : null),
       status: doc.status,
       ingestionNotes: doc.ingestionNotes,
       uploadedByUserId: doc.uploadedByUserId,
@@ -684,9 +697,9 @@ export class DocumentsService {
         id: `${doc.id}-line-${i}`,
         itemOrder: i,
         description: li.description,
-        quantity: li.quantity,
-        unitPrice: li.unitPrice,
-        lineTotal: li.lineTotal,
+        quantity: roundMoney2Decimals(li.quantity),
+        unitPrice: roundMoney2Decimals(li.unitPrice),
+        lineTotal: roundMoney2Decimals(li.lineTotal),
         unitLabel: li.unitLabel ?? null,
       })),
       validationIssues: doc.validationIssues.map((v) => ({
@@ -696,6 +709,7 @@ export class DocumentsService {
         message: v.message,
         severity: v.severity,
       })),
+      rawExtractedData: (doc as { rawExtractedData?: unknown }).rawExtractedData ?? null,
     };
   }
 }
