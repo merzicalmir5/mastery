@@ -92,18 +92,18 @@
   &__issues-title {
     font-weight: 700;
     margin-bottom: 0.5rem;
-    color: var(--issues-title);
+    color: var(--status-error);
   }
 
   &__issues-list {
     margin: 0;
     padding-left: 1.2rem;
     font-size: 0.88rem;
-    color: var(--issues-body);
+    color: var(--status-error);
   }
 
-  &__issues-item--warn {
-    color: var(--status-warn);
+  &__issues-item {
+    color: var(--status-error);
   }
 
   &__card {
@@ -159,7 +159,7 @@
 
   &__lines-table {
     width: 100%;
-    min-width: 36rem;
+    min-width: 42rem;
     border-collapse: separate;
     border-spacing: 0 0.5rem;
     table-layout: fixed;
@@ -176,11 +176,15 @@
   }
 
   &__lines-th--desc {
-    width: 40%;
+    width: 34%;
   }
 
   &__lines-th--qty {
     width: 5.75rem;
+  }
+
+  &__lines-th--price {
+    width: 6.75rem;
   }
 
   &__lines-th--unit {
@@ -249,6 +253,28 @@
     min-width: 0;
   }
 
+  &__vat-lines {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+    gap: 0.75rem 1rem;
+    align-items: start;
+  }
+
+  &__vat-line {
+    min-width: 0;
+  }
+
+  &__vat-hint {
+    font-size: 0.72rem;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  &__vat-issues {
+    grid-column: 1 / -1;
+  }
+
   &__field {
     width: 100%;
   }
@@ -284,7 +310,7 @@
   &__line-issue {
     margin: 0.75rem 0 0;
     font-size: 0.82rem;
-    color: var(--status-issue);
+    color: var(--status-error);
   }
 
   &__pagination {

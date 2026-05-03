@@ -2,6 +2,7 @@ import { HttpClient, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { EMPTY, Observable, catchError, filter, map, mergeMap, of, tap } from 'rxjs';
 import { API_URL } from '../../../core/config/api-url.token';
+import { roundMoney2Decimals } from '../money-round';
 import type {
   DocumentKind,
   DocumentRecord,
@@ -47,6 +48,7 @@ interface DocumentApiRow {
     message: string;
     severity: string;
   }[];
+  rawExtractedData?: unknown | null;
 }
 
 interface PaginatedResponse<T> {
@@ -122,6 +124,7 @@ function mapRow(api: DocumentApiRow): DocumentRecord {
   return {
     id: api.id,
     lineItemsData: api.lineItemsData ?? undefined,
+    rawExtractedData: api.rawExtractedData ?? undefined,
     fileName: api.fileName,
     sourceType: mapSourceType(api.sourceType),
     originalMimeType: api.originalMimeType,
@@ -132,15 +135,15 @@ function mapRow(api: DocumentApiRow): DocumentRecord {
     dueDate: api.dueDate ?? '',
     currency: api.currency ?? '',
     status: mapStatus(api.status),
-    subtotal: api.subtotal ?? 0,
-    tax: api.tax ?? 0,
-    total: api.total ?? 0,
+    subtotal: roundMoney2Decimals(api.subtotal ?? 0),
+    tax: roundMoney2Decimals(api.tax ?? 0),
+    total: roundMoney2Decimals(api.total ?? 0),
     lineItems: api.lineItems.map((li) => ({
       id: li.id,
       description: li.description,
-      quantity: li.quantity,
-      unitPrice: li.unitPrice,
-      lineTotal: li.lineTotal,
+      quantity: roundMoney2Decimals(li.quantity),
+      unitPrice: roundMoney2Decimals(li.unitPrice),
+      lineTotal: roundMoney2Decimals(li.lineTotal),
       unitLabel: li.unitLabel ?? undefined,
     })),
     validationIssues: issues,

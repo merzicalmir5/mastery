@@ -72,6 +72,7 @@ html {
   --status-validated: #15803d;
   --status-rejected: #b91c1c;
   --status-issue: #b91c1c;
+  --status-error: #b91c1c;
   --status-warn: #92400e;
   --issues-title: #991b1b;
   --issues-body: rgba(17, 24, 39, 0.85);
@@ -110,6 +111,7 @@ html.theme-dark {
   --status-validated: #4ade80;
   --status-rejected: #f87171;
   --status-issue: #f87171;
+  --status-error: #f87171;
   --status-warn: #fbbf24;
   --issues-title: #fca5a5;
   --issues-body: rgba(255, 255, 255, 0.88);

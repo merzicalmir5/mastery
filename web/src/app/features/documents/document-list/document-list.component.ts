@@ -8,7 +8,10 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { MatNativeDateModule } from '@angular/material/core';
+import { MatDatepickerModule } from '@angular/material/datepicker';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
@@ -27,6 +30,7 @@ import { DocumentService, type PageParams } from '../services/document.service';
   imports: [
     CommonModule,
     RouterLink,
+    ReactiveFormsModule,
     MatTableModule,
     MatButtonModule,
     MatIconModule,
@@ -34,6 +38,8 @@ import { DocumentService, type PageParams } from '../services/document.service';
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
+    MatDatepickerModule,
+    MatNativeDateModule,
   ],
   templateUrl: './document-list.component.html',
   styleUrl: './document-list.component.scss',
@@ -42,6 +48,7 @@ export class DocumentListComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly documents = inject(DocumentService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly fb = inject(FormBuilder);
   private readonly searchSubject = new Subject<string>();
 
   readonly page = signal(1);
@@ -59,6 +66,10 @@ export class DocumentListComponent implements OnInit {
   readonly filterStatus = signal<DocumentStatus | ''>('');
   readonly filterUpdatedFrom = signal('');
   readonly filterUpdatedTo = signal('');
+  readonly updatedRange = this.fb.group({
+    start: this.fb.control<Date | null>(null),
+    end: this.fb.control<Date | null>(null),
+  });
   readonly filterIssues = signal<'has' | 'none' | ''>('');
 
   readonly showStatusFilter = computed(() => !this.statusFilter());
@@ -84,6 +95,13 @@ export class DocumentListComponent implements OnInit {
       .pipe(debounceTime(350), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((q) => {
         this.qApplied.set(q);
+        this.page.set(1);
+        this.documents.refresh(this.refreshParams()).subscribe();
+      });
+
+    this.updatedRange.valueChanges
+      .pipe(debounceTime(200), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
         this.page.set(1);
         this.documents.refresh(this.refreshParams()).subscribe();
       });
@@ -125,6 +143,7 @@ export class DocumentListComponent implements OnInit {
     this.filterStatus.set('');
     this.filterUpdatedFrom.set('');
     this.filterUpdatedTo.set('');
+    this.updatedRange.reset({ start: null, end: null }, { emitEvent: false });
     this.filterIssues.set('');
     this.page.set(1);
     this.documents.refresh(this.refreshParams()).subscribe();
@@ -167,8 +186,8 @@ export class DocumentListComponent implements OnInit {
       q: this.qApplied().trim() || undefined,
       fileName: this.filterFileName().trim() || undefined,
       documentKind: kind ? kind : undefined,
-      updatedFrom: this.toIsoOrUndefined(this.filterUpdatedFrom()),
-      updatedTo: this.toIsoOrUndefined(this.filterUpdatedTo()),
+      updatedFrom: this.rangeStartToIso() ?? this.toIsoOrUndefined(this.filterUpdatedFrom()),
+      updatedTo: this.rangeEndToIso() ?? this.toIsoOrUndefined(this.filterUpdatedTo()),
       issueFilter: issues ? issues : undefined,
     };
   }
@@ -183,6 +202,51 @@ export class DocumentListComponent implements OnInit {
       return undefined;
     }
     return d.toISOString();
+  }
+
+  private static startOfLocalDay(d: Date): Date {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  }
+
+  private static endOfLocalDay(d: Date): Date {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+  }
+
+  private static calendarDayKey(d: Date): number {
+    return d.getFullYear() * 10_000 + d.getMonth() * 100 + d.getDate();
+  }
+
+  /** Inclusive lower bound for `updatedAt` (start of local calendar day). */
+  private rangeStartToIso(): string | undefined {
+    const { start, end } = this.updatedRange.getRawValue();
+    let s = start instanceof Date && !Number.isNaN(start.getTime()) ? start : null;
+    let e = end instanceof Date && !Number.isNaN(end.getTime()) ? end : null;
+    if (s && e && DocumentListComponent.calendarDayKey(s) > DocumentListComponent.calendarDayKey(e)) {
+      const t = s;
+      s = e;
+      e = t;
+    }
+    if (!s) {
+      return undefined;
+    }
+    return DocumentListComponent.startOfLocalDay(s).toISOString();
+  }
+
+  /** Inclusive upper bound for `updatedAt` (end of local calendar day). */
+  private rangeEndToIso(): string | undefined {
+    const { start, end } = this.updatedRange.getRawValue();
+    let s = start instanceof Date && !Number.isNaN(start.getTime()) ? start : null;
+    let e = end instanceof Date && !Number.isNaN(end.getTime()) ? end : null;
+    if (s && e && DocumentListComponent.calendarDayKey(s) > DocumentListComponent.calendarDayKey(e)) {
+      const t = s;
+      s = e;
+      e = t;
+    }
+    const pick = e ?? s;
+    if (!pick) {
+      return undefined;
+    }
+    return DocumentListComponent.endOfLocalDay(pick).toISOString();
   }
 
   private loadPage(page: number): void {

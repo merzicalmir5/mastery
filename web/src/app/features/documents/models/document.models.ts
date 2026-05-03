@@ -22,6 +22,7 @@ export interface LineItem {
 export interface DocumentRecord {
   id: string;
   lineItemsData?: unknown;
+  rawExtractedData?: unknown;
   fileName: string;
   sourceType: DocumentSourceType;
   originalMimeType: string | null;

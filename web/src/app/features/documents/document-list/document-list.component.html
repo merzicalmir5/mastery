@@ -69,24 +69,14 @@
         </mat-select>
       </mat-form-field>
 
-      <mat-form-field appearance="outline" subscriptSizing="dynamic">
-        <mat-label>Updated from</mat-label>
-        <input
-          matInput
-          type="datetime-local"
-          [value]="filterUpdatedFrom()"
-          (change)="filterUpdatedFrom.set(($any($event.target)).value); onFiltersChange()"
-        />
-      </mat-form-field>
-
-      <mat-form-field appearance="outline" subscriptSizing="dynamic">
-        <mat-label>Updated to</mat-label>
-        <input
-          matInput
-          type="datetime-local"
-          [value]="filterUpdatedTo()"
-          (change)="filterUpdatedTo.set(($any($event.target)).value); onFiltersChange()"
-        />
+      <mat-form-field appearance="outline" subscriptSizing="dynamic" class="doc-list__filter-range">
+        <mat-label>Updated between</mat-label>
+        <mat-date-range-input [rangePicker]="updatedPicker" [formGroup]="updatedRange">
+          <input matStartDate formControlName="start" placeholder="Start date" />
+          <input matEndDate formControlName="end" placeholder="End date" />
+        </mat-date-range-input>
+        <mat-datepicker-toggle matSuffix [for]="updatedPicker" />
+        <mat-date-range-picker #updatedPicker />
       </mat-form-field>
 
       <div class="doc-list__filter-actions">
