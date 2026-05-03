@@ -143,40 +143,81 @@
   }
 
   &__lines-edit {
+    max-height: 28rem;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 0.65rem;
-    max-height: 28rem;
-    overflow: auto;
     padding: 0.75rem 0.25rem 0.25rem 0;
   }
 
-  &__line-row {
-    display: grid;
-    grid-template-columns: 1fr 5.5rem 5.5rem 6.5rem auto;
-    gap: 0.5rem 0.65rem;
-    align-items: start;
-
-    &--header {
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--app-text-secondary);
-      margin-bottom: -0.15rem;
-    }
+  &__lines-table-scroll {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -0.15rem;
+    padding: 0 0.15rem;
   }
 
-  &__line-header-cell {
-    padding: 0 0.25rem;
+  &__lines-table {
+    width: 100%;
+    min-width: 36rem;
+    border-collapse: separate;
+    border-spacing: 0 0.5rem;
+    table-layout: fixed;
   }
 
-  @media (max-width: 900px) {
-    &__line-row {
-      grid-template-columns: 1fr 1fr 1fr;
+  &__lines-th {
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--app-text-secondary);
+    padding: 0 0.4rem 0.2rem;
+    vertical-align: bottom;
+    line-height: 1.2;
+  }
 
-      .doc-detail__line-remove {
-        grid-column: 1 / -1;
-      }
-    }
+  &__lines-th--desc {
+    width: 40%;
+  }
+
+  &__lines-th--qty {
+    width: 5.75rem;
+  }
+
+  &__lines-th--unit {
+    width: 6.5rem;
+  }
+
+  &__lines-th--total {
+    width: 7.25rem;
+  }
+
+  &__lines-th--action {
+    width: 5.5rem;
+  }
+
+  &__lines-td {
+    vertical-align: top;
+    padding: 0 0.4rem;
+  }
+
+  &__lines-data-row .doc-detail__line-remove {
+    margin-top: 0.6rem;
+  }
+
+  &__lines-issue-row td {
+    padding: 0 0.4rem 0.15rem;
+  }
+
+  &__sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   &__line-field {
@@ -188,7 +229,6 @@
   }
 
   &__line-remove {
-    margin-top: 0.35rem;
     white-space: nowrap;
   }
 

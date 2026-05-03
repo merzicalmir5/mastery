@@ -57,6 +57,8 @@ export class DocumentDetailComponent {
 
   readonly detailLoadFailed = signal(false);
 
+  private hydratedDocId = signal<string | null>(null);
+
   readonly doc = computed(() => {
     this.documents.data();
     const id = this.documentId();
@@ -108,10 +110,26 @@ export class DocumentDetailComponent {
       onCleanup(() => sub.unsubscribe());
     });
     effect(() => {
-      const d = this.doc();
-      if (!d) {
+      const id = this.documentId();
+      if (!id) {
+        this.hydratedDocId.set(null);
         return;
       }
+      const d = this.doc();
+      if (!d || d.id !== id) {
+        return;
+      }
+
+      const navigatedToNewDoc = this.hydratedDocId() !== id;
+      if (navigatedToNewDoc) {
+        this.hydratedDocId.set(id);
+      }
+
+      // Store/list refresh can replace the row while you're editing — don't stomp local changes.
+      if (!navigatedToNewDoc && d.status !== 'uploaded' && this.form.dirty) {
+        return;
+      }
+
       this.form.patchValue({
         documentType: d.documentKind === 'purchase_order' ? 'PURCHASE_ORDER' : 'INVOICE',
         supplierName: d.supplierName,
@@ -128,6 +146,7 @@ export class DocumentDetailComponent {
       for (const li of d.lineItems) {
         fa.push(this.lineGroup(li));
       }
+      this.form.markAsPristine();
     });
   }
 
