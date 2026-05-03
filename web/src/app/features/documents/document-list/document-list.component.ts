@@ -52,9 +52,7 @@ export class DocumentListComponent implements OnInit {
     { initialValue: this.route.snapshot.data['statusFilter'] as DocumentStatus | undefined },
   );
 
-  /** Global search (debounced API value) */
   readonly qApplied = signal('');
-  /** Bound to search input for reset/display */
   readonly filterSearchInput = signal('');
   readonly filterFileName = signal('');
   readonly filterKind = signal<DocumentKind | ''>('');

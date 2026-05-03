@@ -32,11 +32,8 @@ export class DocumentFilePreviewComponent {
   private readonly documents = inject(DocumentService);
   private readonly sanitizer = inject(DomSanitizer);
 
-  /** Document id (UUID). */
   readonly documentId = input.required<string>();
-  /** Suggested download file name. */
   readonly fileName = input('');
-  /** Tighter layout for the upload success panel. */
   readonly compact = input(false);
 
   readonly previewBlobUrl = signal<string | null>(null);

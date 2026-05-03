@@ -125,7 +125,6 @@ export class DocumentDetailComponent {
         this.hydratedDocId.set(id);
       }
 
-      // Store/list refresh can replace the row while you're editing — don't stomp local changes.
       if (!navigatedToNewDoc && d.status !== 'uploaded' && this.form.dirty) {
         return;
       }

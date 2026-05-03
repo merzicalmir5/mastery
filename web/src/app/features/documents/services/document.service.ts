@@ -30,6 +30,7 @@ interface DocumentApiRow {
   ingestionNotes: string | null;
   createdAt: string;
   updatedAt: string;
+  lineItemsData?: unknown | null;
   lineItems: {
     id: string;
     itemOrder: number;
@@ -120,6 +121,7 @@ function mapRow(api: DocumentApiRow): DocumentRecord {
 
   return {
     id: api.id,
+    lineItemsData: api.lineItemsData ?? undefined,
     fileName: api.fileName,
     sourceType: mapSourceType(api.sourceType),
     originalMimeType: api.originalMimeType,
@@ -159,11 +161,9 @@ export class DocumentService {
     totalPages: 1,
   });
 
-  /** Use inside `computed()` (e.g. `this.documents.data()`) so the view updates when data changes. */
   readonly data = this._store.asReadonly();
   readonly pageMeta = this._pageMeta.asReadonly();
 
-  /** Load all documents for the current user (by company). */
   refresh(params?: Partial<PageParams>): Observable<void> {
     const page = Math.max(1, params?.page ?? 1);
     const pageSize = Math.max(1, params?.pageSize ?? 10);
@@ -207,7 +207,6 @@ export class DocumentService {
     );
   }
 
-  /** Load one document and merge into the store. Returns false on HTTP error (e.g. 404). */
   loadOne(id: string): Observable<boolean> {
     return this.http.get<DocumentApiRow>(`${this.apiUrl}/documents/${id}`).pipe(
       tap((row) => this.upsert(mapRow(row))),
@@ -255,12 +254,10 @@ export class DocumentService {
     );
   }
 
-  /** Authenticated binary GET; use for preview (blob URL) or client-side download. */
   getFileBlob(id: string): Observable<Blob> {
     return this.http.get(`${this.apiUrl}/documents/${id}/file`, { responseType: 'blob' });
   }
 
-  /** Triggers a browser download of the stored file using the given file name. */
   downloadFileBlob(id: string, fileName: string): void {
     this.getFileBlob(id).subscribe({
       next: (blob) => {
