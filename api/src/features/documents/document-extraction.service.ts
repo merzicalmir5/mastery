@@ -19,6 +19,7 @@ import {
   extractSupplierLoose,
   pickMeta,
 } from './document-i18n';
+import { MistralOcrService } from './mistral-ocr.service';
 export type ExtractedLineItem = {
   description: string;
   quantity: number;
@@ -46,7 +47,10 @@ const LINE_ITEM_EPS = 0.02;
 
 @Injectable()
 export class DocumentExtractionService {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly mistralOcr: MistralOcrService,
+  ) {}
 
   async extractFromFile(
     absolutePath: string,
@@ -121,160 +125,51 @@ export class DocumentExtractionService {
     return this.parseTextContent(text);
   }
 
-  /**
-   * Image OCR via external document OCR API (Python FastAPI + EasyOCR). Tesseract.js path is disabled temporarily.
-   * Set OCR_SERVICE_URL to that service’s base URL (local: http://127.0.0.1:8000; Docker Compose: http://ocr-api:8000).
-   * Optional OCR_SERVICE_TIMEOUT_MS (default 120000).
-   */
   private async parseImage(buffer: Buffer): Promise<Partial<ExtractionResult>> {
-    const baseUrl = this.config.get<string>('OCR_SERVICE_URL')?.trim();
-    if (!baseUrl) {
+    if (!this.config.get<string>('MISTRAL_API_KEY')?.trim()) {
       const empty = this.parseTextContent('');
       return {
         ...empty,
         rawExtractedData: {
           ...(empty.rawExtractedData ?? {}),
           source: 'image',
-          ocrError: 'OCR_SERVICE_URL not set',
+          ocrError: 'MISTRAL_API_KEY not set',
         },
         ingestionNotes:
-          'Set OCR_SERVICE_URL to the document OCR API base URL (e.g. http://127.0.0.1:8000 locally, or http://ocr-api:8000 in Docker), start ocr-api, then re-upload.',
+          'Image OCR uses Mistral only. Set MISTRAL_API_KEY in the API environment, then re-upload.',
       };
     }
+    return this.parseImageMistral(buffer);
+  }
 
-    const timeoutMs = Number(this.config.get('OCR_SERVICE_TIMEOUT_MS') ?? 120_000);
-    const endpoint = `${baseUrl.replace(/\/$/, '')}/ocr/image`;
-
+  private async parseImageMistral(buffer: Buffer): Promise<Partial<ExtractionResult>> {
+    const timeoutMs = Number(this.config.get('MISTRAL_OCR_TIMEOUT_MS') ?? 120_000);
     try {
-      const form = new FormData();
-      form.append('file', new Blob([new Uint8Array(buffer)]), 'upload.bin');
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        body: form,
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-
-      const bodyText = await res.text();
-
-      const previewLen = 8000;
-      console.log('[documents.parseImage] document OCR API response', {
-        httpStatus: res.status,
-        ok: res.ok,
-        bodyLength: bodyText.length,
-        body:
-          bodyText.length > previewLen
-            ? `${bodyText.slice(0, previewLen)}… (truncated, ${bodyText.length} chars total)`
-            : bodyText,
-      });
-
-      if (!res.ok) {
-        return {
-          ...this.parseTextContent(''),
-          rawExtractedData: {
-            source: 'image',
-            ocrServiceBase: baseUrl,
-            ocrHttpStatus: res.status,
-            ocrBodyPreview: bodyText.slice(0, 500),
-          },
-          ingestionNotes: `Document OCR API error (${res.status}). Is it reachable at ${baseUrl}?`,
-        };
-      }
-
-      let payload: {
-        fullText?: string;
-        confidence?: number | null;
-        lines?: Array<{ text: string; confidence: number }>;
-        engine?: string;
-        structuredLineItems?: Array<{
-          description?: string;
-          quantity?: number;
-          unit?: string;
-          unitPrice?: number;
-          lineTotal?: number;
-        }>;
-      };
-      try {
-        payload = JSON.parse(bodyText) as typeof payload;
-      } catch {
-        return {
-          ...this.parseTextContent(''),
-          rawExtractedData: {
-            source: 'image',
-            ocrServiceBase: baseUrl,
-            ocrError: 'invalid JSON from document OCR API',
-            ocrBodyPreview: bodyText.slice(0, 300),
-          },
-          ingestionNotes: 'Document OCR API returned invalid JSON.',
-        };
-      }
-
-      const text = typeof payload.fullText === 'string' ? payload.fullText : '';
-      const confidence = payload.confidence ?? null;
-      const parsed = this.parseTextContent(text);
-
-      const structured = Array.isArray(payload.structuredLineItems)
-        ? payload.structuredLineItems
-        : [];
-      const fromStructured: ExtractedLineItem[] = structured
-        .filter(
-          (r) =>
-            typeof r.description === 'string' &&
-            r.description.trim().length > 0 &&
-            r.lineTotal != null &&
-            Number.isFinite(Number(r.lineTotal)),
-        )
-        .map((r) => {
-          const qtyRaw = Number(r.quantity);
-          const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 ? Math.floor(qtyRaw) : 1;
-          const lt = Number(r.lineTotal);
-          let unitPrice =
-            r.unitPrice != null && Number.isFinite(Number(r.unitPrice))
-              ? Number(r.unitPrice)
-              : lt / qty;
-          if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-            unitPrice = qty > 0 ? lt / qty : 0;
-          }
-          const ul = typeof r.unit === 'string' && r.unit.trim() ? r.unit.trim() : 'each';
-          return {
-            description: r.description!.trim(),
-            quantity: qty,
-            unitPrice,
-            lineTotal: lt,
-            unitLabel: ul,
-          };
-        });
-
-      const lineItems =
-        fromStructured.length > 0 ? fromStructured : (parsed.lineItems ?? []);
-
+      const { fullText, model } = await this.mistralOcr.processImage(buffer);
+      const parsed = this.parseTextContent(fullText);
       return {
         ...parsed,
-        lineItems,
         rawExtractedData: {
           ...(parsed.rawExtractedData ?? {}),
           source: 'image',
-          engine: payload.engine ?? 'easyocr',
-          confidence,
-          ocrServiceBase: baseUrl,
-          ocrLinesPreview: payload.lines?.slice(0, 40),
-          structuredLineItemsPreview: structured.slice(0, 20),
+          engine: 'mistral-ocr',
+          mistralModel: model,
         },
-        ingestionNotes: text.trim()
-          ? 'Document OCR API (EasyOCR) extracted text. Please review recognized values.'
+        ingestionNotes: fullText.trim()
+          ? 'Mistral OCR extracted text. Please review recognized values.'
           : 'OCR did not detect enough text. Please review and enter data manually.',
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[documents.parseImage] OCR service request failed', msg);
+      console.error('[documents.parseImage] Mistral OCR failed', msg);
       return {
         ...this.parseTextContent(''),
         rawExtractedData: {
           source: 'image',
-          ocrServiceBase: baseUrl,
+          engine: 'mistral-ocr',
           ocrError: msg,
         },
-        ingestionNotes: `Document OCR API unreachable or timed out (${timeoutMs}ms): ${msg}`,
+        ingestionNotes: `Mistral OCR failed or timed out (${timeoutMs}ms): ${msg}`,
       };
     }
   }
@@ -575,8 +470,39 @@ export class DocumentExtractionService {
     };
   }
 
+  private normalizeMarkdownPipeTableLines(text: string): string {
+    const lines = text.split('\n');
+    const out: string[] = [];
+    for (const raw of lines) {
+      const trimmed = raw.trim();
+      if (!trimmed.startsWith('|')) {
+        out.push(raw);
+        continue;
+      }
+      const lastPipe = trimmed.lastIndexOf('|');
+      if (lastPipe <= 0) {
+        out.push(raw);
+        continue;
+      }
+      const inner = trimmed.slice(1, lastPipe);
+      const cells = inner.split('|').map((c) => c.trim());
+      if (cells.length < 2) {
+        out.push(raw);
+        continue;
+      }
+      const isSeparator =
+        cells.length >= 2 &&
+        cells.every((c) => c.length === 0 || /^:?-{3,}:?$/.test(c.replace(/\s+/g, '')));
+      if (isSeparator) {
+        continue;
+      }
+      out.push(cells.join(' ').replace(/\s+/g, ' ').trim());
+    }
+    return out.join('\n');
+  }
+
   private parseTextContent(text: string): Partial<ExtractionResult> {
-    const t = text.replace(/\r/g, '\n');
+    const t = this.normalizeMarkdownPipeTableLines(text.replace(/\r/g, '\n'));
     const meta: Record<string, string> = {};
     const kvLine = /^\s*([^:\n]+)\s*:\s*(.+)$/gim;
     let m: RegExpExecArray | null;
